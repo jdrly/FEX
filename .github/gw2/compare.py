@@ -19,9 +19,10 @@
 #     gate of jdrly/wine's compare.py (byte_gate: the header, every section of every loaded
 #     segment, the load commands and the link edit data);
 #   - a .so, with the structural gate (for another Xcode, whose clang can't give the engine's
-#     bytes): the engine's install name, rpaths, libraries, minos, segments and sections (names,
-#     order, kinds), and the same functions by name. Which functions differ in their bytes, with
-#     branch and address immediates masked, is a report and fails nothing;
+#     bytes): the engine's install name, rpaths, libraries, minos, segments (names, order, kinds),
+#     each segment's sections (names and kinds; the order is the linker's, so only reported), and
+#     the same functions by name. Which functions differ in their bytes, with branch and address
+#     immediates masked, is a report and fails nothing;
 #   - a DLL, with either gate, since llvm-mingw builds it: every byte, with the COFF header's
 #     TimeDateStamp and each debug directory entry's
 #     masked, since LLD writes the link time there. The build id (the CodeView record's GUID and
@@ -279,14 +280,21 @@ def byte_gate(mine, theirs, r):
 
 
 def structural_gate(mine, theirs, r):
-    """the engine's file's shape, for a build with another compiler: the segments and sections by
-    name, order and kind, and the functions by name; which functions differ in their bytes is a
-    report. Returns that report's line for VERSION."""
-    shape = lambda m: ([(s["name"], s["maxprot"], s["initprot"]) for s in m.segments],
-                       [(s["name"], s["type"], s["flags"]) for s in m.sections])
-    r.check(shape(mine) == shape(theirs), f"the engine's {len(theirs.segments)} segments and {len(theirs.sections)} sections, "
-                                          f"by name, order and kind: {listing([s['name'] for s in theirs.sections], 20)}",
-            f"segments or sections differ: mine {shape(mine)}, the engine's {shape(theirs)}")
+    """the engine's file's shape, for a build with another compiler: the segments by name, order and
+    kind, each one's sections by name and kind, and the functions by name; which functions differ
+    in their bytes, and sections in another order, are a report. Returns the line for VERSION."""
+    segments = lambda m: [(s["name"], s["maxprot"], s["initprot"]) for s in m.segments]
+    sections = lambda m: sorted((s["name"], s["type"], s["flags"]) for s in m.sections)
+    r.check(segments(mine) == segments(theirs), f"the engine's {len(theirs.segments)} segments, by name, order and kind: "
+                                                f"{listing([s['name'] for s in theirs.segments])}",
+            f"segments differ: mine {segments(mine)}, the engine's {segments(theirs)}")
+    r.check(sections(mine) == sections(theirs), f"the engine's {len(theirs.sections)} sections, by name and kind: "
+                                                f"{listing([s['name'] for s in theirs.sections], 20)}",
+            f"sections differ: mine {sections(mine)}, the engine's {sections(theirs)}")
+    order = lambda m: [s["name"] for s in m.sections]
+    if order(mine) != order(theirs) and sections(mine) == sections(theirs):
+        print(f"- report, not the gate: the linker put the sections in another order: mine {', '.join(order(mine))}; "
+              f"the engine's {', '.join(order(theirs))}")
     fm, ft = mine.functions(), theirs.functions()
     r.check(set(fm) == set(ft), f"the engine's {len(ft)} functions by name",
             f"functions differ by name: missing {listing(set(ft) - set(fm))}; extra {listing(set(fm) - set(ft))}")
@@ -727,7 +735,7 @@ def run_files(mine, engine, baseline, gate="strict"):
         if not ok:
             failed.append(os.path.basename(rel))
         if h:
-            held.append(f"{os.path.basename(rel)} {h}")
+            held.append(f"{os.path.basename(rel)} {h}" if ok else f"{os.path.basename(rel)} failed its gate")
     if held:
         print(f"\nbaseline: {', '.join(held)}")
     return failed
@@ -834,6 +842,17 @@ def selftest(engine):
         out = run("structural: other bytes in one function only", lambda: run_s(d), 0, "")
         status.append("1 of 12 functions differ in their bytes: `__ZL24FEXUnixLib_GetPIDHandlerPv`" in out)
         print(f"{'ok' if status[-1] else 'FAIL'}: the report names that function")
+
+        # two sections of one segment in each other's place, as Xcode 27's linker puts
+        # __DATA_CONST's __const and __got: reported, not failed
+        d = copy()
+        m = MachO(os.path.join(d, so))
+        seg = next(o for c, o, _ in m.commands if c == LC_SEGMENT_64 and m.data[o + 8:o + 24].rstrip(b"\0") == b"__DATA_CONST")
+        a, b = seg + 72, seg + 72 + 80
+        patch(m.path, a, m.data[b:b + 80] + m.data[a:a + 80])
+        out = run("structural: two sections of a segment swapped", lambda: run_s(d), 0, "")
+        status.append("the linker put the sections in another order" in out)
+        print(f"{'ok' if status[-1] else 'FAIL'}: the report says the order differs")
 
         for label, change in (
                 ("a missing export", lambda m: (symbol_name_offset(m, "___wine_unix_call_funcs") + 3, b"X")),
