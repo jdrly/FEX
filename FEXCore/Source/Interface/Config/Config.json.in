@@ -772,6 +772,16 @@
           "  * Disable TSO for multiple modules",
           "      `hl2_linux:libsdl2.so`"
         ]
+      },
+      "InitialCodeBufferMB": {
+        "Type": "uint32",
+        "Default": "16",
+        "AffectsCodeGen": "false",
+        "Desc": [
+          "Size in MB of the first code buffer: 16, 32, 64 or 128",
+          "Each time the buffer fills, all translated code is thrown away and a buffer twice the size, up to 128 MB, takes its place",
+          "Any other value logs an error and means 16"
+        ]
       }
     }
   },
