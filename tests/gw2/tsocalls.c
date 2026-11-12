@@ -1,10 +1,10 @@
 /* gw2 (jdrly/gw2-on-mac#113): what a guest syscall costs with FEX_HARDWARETSOSYSCALLS=switch and
  * with keep. A Win64 x86_64 program, built with llvm-mingw.
  *
- *   tsocalls.exe [<iterations>]
+ *   tsocalls.exe
  *
- * Three loops, each on a thread of its own, one after the other, <iterations> each (ten million
- * by default):
+ * Three loops, each on a thread of its own, one after the other, GW2_TSOCALLS_ITERATIONS each (ten
+ * million by default; the test stage passes no arguments, only variables):
  *
  *   native  RtlGetCurrentPeb, an ntdll export that makes no syscall: an exit into native code
  *           and back, and no trap in either mode
@@ -83,7 +83,7 @@ static DWORD WINAPI run_loop(void *arg)
     return 0;
 }
 
-int main(int argc, char **argv)
+int main(void)
 {
     struct loop loops[3] = {{"native", 0}, {"close", 1}, {"qpc", 2}};
     HANDLE threads[3];
@@ -91,10 +91,11 @@ int main(int argc, char **argv)
     unsigned long long t0, t1;
     HMODULE ntdll = GetModuleHandleA("ntdll.dll");
     int reader = getenv("GW2_TEST_FLAG") != NULL;
+    const char *count = getenv("GW2_TSOCALLS_ITERATIONS");
 
-    if (argc > 2 || (argc == 2 && !(iterations = strtoull(argv[1], NULL, 10))))
+    if (count && !(iterations = strtoull(count, NULL, 10)))
     {
-        printf("gw2 test tsocalls: usage: tsocalls.exe [<iterations>]\n");
+        printf("gw2 test tsocalls: GW2_TSOCALLS_ITERATIONS=%s isn't a count\n", count);
         return 2;
     }
     rtl_get_current_peb = (peb_fn)GetProcAddress(ntdll, "RtlGetCurrentPeb");
