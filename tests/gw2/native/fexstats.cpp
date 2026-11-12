@@ -7,7 +7,7 @@
  * the contract is on its own because FEX's other headers don't build for macOS. It never runs
  * Wine itself.
  *
- *   fexstats <pid>...
+ *   fexstats [--header] <pid>...
  *
  * With FEX_PROFILESTATS=1, FEX's unix half creates the shared memory object fex-<pid>-stats for
  * its process (Source/Windows/UnixLib/FEXUnixLib.cpp, InitializeSHM): a ThreadStatsHeader, then
@@ -24,6 +24,10 @@
  * Exit 0: it read one. 1: none of the pids has one yet, or its header isn't written yet. 3: the
  * object's version or slot size isn't this tree's, so it was made by another FEX than these
  * headers describe; the header line is printed, the slots aren't.
+ *
+ * With --header it prints only the header line and exits 0 whatever the layout: FEX only appends
+ * to the header and the slots, so the version and fex_version stay where they are. That is how
+ * the test stage asks which FEX ran, the engine's included, after my stats layout has moved on.
  *
  * A change to ThreadStats adds its field to FEX_STATS_FIELDS and raises STATS_VERSION in FEX;
  * GW2ContractStats.h and my Wine fork's heatprof.h follow.
@@ -56,13 +60,16 @@
 using Header = GW2Contract::ThreadStatsHeader;
 using Slot = GW2Contract::ThreadStats;
 
-static int Print(const char* Name, const uint8_t* Base, size_t Size) {
+static int Print(const char* Name, const uint8_t* Base, size_t Size, bool HeaderOnly) {
   const auto* Head = reinterpret_cast<const Header*>(Base);
   if (!Head->fex_version[0]) {
     return 1;
   }
   printf("%s: version %u, app type %u, slot %u bytes, FEX %.*s\n", Name, Head->Version, static_cast<unsigned>(Head->app_type),
          Head->ThreadStatsSize, static_cast<int>(strnlen(Head->fex_version, sizeof(Head->fex_version))), Head->fex_version);
+  if (HeaderOnly) {
+    return 0;
+  }
   if (Head->Version != FEXCore::SHMStats::STATS_VERSION || Head->ThreadStatsSize != sizeof(Slot)) {
     printf("%s: not this tree's layout (version %u, slot %zu bytes), so no slots\n", Name, FEXCore::SHMStats::STATS_VERSION, sizeof(Slot));
     return 3;
@@ -88,7 +95,12 @@ static int Print(const char* Name, const uint8_t* Base, size_t Size) {
 }
 
 int main(int argc, char** argv) {
-  for (int i = 1; i < argc; i++) {
+  int First = 1;
+  const bool HeaderOnly = argc > 1 && !strcmp(argv[1], "--header");
+  if (HeaderOnly) {
+    First = 2;
+  }
+  for (int i = First; i < argc; i++) {
     char Name[64];
     struct stat St;
     snprintf(Name, sizeof(Name), "fex-%s-stats", argv[i]);
@@ -105,7 +117,7 @@ int main(int argc, char** argv) {
     if (Base == MAP_FAILED) {
       continue;
     }
-    const int Result = Print(Name, static_cast<const uint8_t*>(Base), St.st_size);
+    const int Result = Print(Name, static_cast<const uint8_t*>(Base), St.st_size, HeaderOnly);
     munmap(Base, St.st_size);
     if (Result != 1) {
       return Result;

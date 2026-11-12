@@ -522,23 +522,39 @@ jobs:
         with:
           key: fex-core-ccache-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.CCACHE_DIR }}
-      # Each suite's failures as "<suite> <test>", from ctest's LastTestsFailed.log. The instruction
-      # count tests write each listing's new numbers into the tree (FEX's instcountci_update_tests),
-      # and a listing git then sees changed is one this commit's JIT generates other code for.
+      # Each suite's failures as "<suite> <test>", from ctest's LastTestsFailed.log. A suite counts
+      # only when ctest ran it to the end: its total line ("… tests passed, F tests failed out of
+      # N") with N above 0, and F the number of tests LastTestsFailed.log lists. The instruction
+      # count tests write each listing's new numbers into the tree (FEX's instcountci_update_tests,
+      # whose own failures are on the list too), and a listing git then sees changed is one this
+      # commit's JIT generates other code for.
       - name: Run them
         run: |
           out=$RUNNER_TEMP/core
           mkdir -p "$out"
-          failed() { sed -n 's/^[0-9]*:/'"$1"' /p' build/Testing/Temporary/LastTestsFailed.log 2>/dev/null || true; }
-          (cd build && FEX_HOSTFEATURES=disablesve,disableafp ctest --timeout 302 -j"$(nproc)" -R '\.asm$' >"$out/asm.log" 2>&1) || true
-          failed asm >"$out/failures"
-          rm -f build/Testing/Temporary/LastTestsFailed.log
-          (cd build && ctest --timeout 302 -j"$(nproc)" -R 'InstCountCI/.*\.instcountci$' >"$out/instcountci.log" 2>&1) || true
-          failed instcountci >>"$out/failures"
-          (cd build && ctest --timeout 302 -j"$(nproc)" -R 'InstCountCI/.*new_numbers$' >"$out/instcountci-update.log" 2>&1) || true
-          git diff --name-only -- unittests/InstructionCountCI | sed 's/^/instcountci-numbers /' >>"$out/failures"
-          LC_ALL=C sort -o "$out/failures" "$out/failures"
-          for f in asm instcountci; do grep -hE 'tests passed, [0-9]+ tests? failed out of' "$out/$f.log" || echo "$f: no ctest total"; done | tee "$out/totals"
+          : >"$out/totals"
+          status=0
+          suite() {
+            local name=$1 regex=$2 rc=0 total failed
+            shift 2
+            rm -f build/Testing/Temporary/LastTestsFailed.log
+            (cd build && env "$@" ctest --no-tests=error --timeout 302 -j"$(nproc)" -R "$regex" >"$out/$name.log" 2>&1) || rc=$?
+            total=$(grep -oE '[0-9]+ tests? failed out of [0-9]+' "$out/$name.log" | tail -n 1 || true)
+            echo "$name: ctest exit $rc, ${total:-no total}" | tee -a "$out/totals"
+            sed -n 's/^[0-9]*:/'"$name"' /p' build/Testing/Temporary/LastTestsFailed.log 2>/dev/null >"$out/$name.failed" || true
+            failed=$(grep -c . "$out/$name.failed" || true)
+            if [[ -z $total || ${total##* } == 0 || ${total%% *} != "$failed" ]]; then
+              echo "::error::the $name tests didn't run to the end (ctest exit $rc, ${total:-no total}, $failed in LastTestsFailed.log)"
+              tail -n 30 "$out/$name.log"
+              status=1
+            fi
+          }
+          suite asm '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp
+          suite instcountci 'InstCountCI/.*\.instcountci$'
+          suite instcountci-update 'InstCountCI/.*new_numbers$'
+          git diff --name-only -- unittests/InstructionCountCI | sed 's/^/instcountci-numbers /' >"$out/instcountci-numbers.failed"
+          LC_ALL=C sort "$out"/*.failed >"$out/failures"
+          exit "$status"
       - name: Against the reference list
         run: |
           out=$RUNNER_TEMP/core ref=tests/gw2/core-failures.txt

@@ -10,7 +10,7 @@
 # smoke/fex.c), <name>.exe for each tests/gw2/<name>.c, and fexstats (tests/gw2/native). The
 # versions are what the FEX that ran has to say: git describe of the engine's commit and of mine.
 #
-# cases.zsh is a list of calls to the three functions below, one line per case, run in order:
+# cases.zsh is a list of calls to the four functions below, one line per case, run in order:
 #
 #   check  <label> <engines> <seconds> <program> <line> [<VAR=value>...]
 #       <program> has to print <line> and exit 0 within <seconds>, with each <VAR=value> set.
@@ -19,7 +19,11 @@
 #       (gw2test.h) each time it wants to be read, and fexstats reads its stats object then, into
 #       <label>.reader.1, .2 and so on. One line of the last read has to match <pattern>, a zsh
 #       pattern in which {version} stands for the version of the FEX that should be running. A
-#       case that compares reads with each other can read the files itself after its stats line.
+#       read fails the case when fexstats can't read the slots (another layout: exit 3). A case
+#       that compares reads with each other can read the files itself after its stats line.
+#   version <label> <engines> <seconds> <program> <line> [<VAR=value>...]
+#       a stats case that reads only the header (fexstats --header, which reads any layout), and
+#       the last read has to say the version of the FEX that should be running.
 #   report <label> <case label> <pattern>
 #       whether a line of that case's log matches <pattern>. Fails nothing; the answer, yes or
 #       no, goes into the summary and into <work dir>/<engine>/<label>, for a later case to read.
@@ -51,8 +55,8 @@ stats() {
   local label=$1 engines=$2 secs=$3 program=$4 line=$5 pattern=${6//\{version\}/$versions[$which]}
   shift 6
   applies $engines || return 0
-  GW2_TEST_READER=$tests/fexstats "$here/run.zsh" "$wine" "$prefix" "$label" "$secs" "$line" "$tests/$program" \
-    "$@" FEX_PROFILESTATS=1 || failed+=1
+  GW2_TEST_READER="$tests/fexstats ${GW2_STATS_OPTIONS:-}" "$here/run.zsh" "$wine" "$prefix" "$label" "$secs" "$line" \
+    "$tests/$program" "$@" FEX_PROFILESTATS=1 || failed+=1
   local files=($prefix/$label.reader.<->(Nn)) f
   for f in $files; do
     print "      read ${f##*.}:"
@@ -65,6 +69,12 @@ stats() {
     print "FAIL  $label: no line of fexstats's last read matches $pattern"
     failed+=1
   fi
+}
+
+version() {
+  local label=$1 engines=$2 secs=$3 program=$4 line=$5
+  shift 5
+  GW2_STATS_OPTIONS=--header stats "$label" "$engines" "$secs" "$program" "$line" 'fex-<->-stats: *, FEX {version}' "$@"
 }
 
 report() {

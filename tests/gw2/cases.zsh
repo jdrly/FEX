@@ -16,4 +16,4 @@ check smoke-log both 40 fex.exe "$smoke" FEX_SILENTLOG=0 WINEDEBUG=
 report hardware-tso smoke-log '*FEX: Using hardware TSO*'
 
 # Which FEX ran: its version in the header of its stats object
-stats fex-version both 120 wait.exe 'gw2 test wait: passed' 'fex-<->-stats: *, FEX {version}'
+version fex-version both 120 wait.exe 'gw2 test wait: passed'

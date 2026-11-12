@@ -11,13 +11,15 @@
 # program's output goes to <prefix>/<label>.log. It has to print the line <want> and exit 0
 # within <seconds>.
 #
-# With GW2_TEST_READER=<native program>, the program gets GW2_TEST_FLAG, a file to wait for
-# (tests/gw2/gw2test.h). Each time it prints the line "gw2 test ready", the reader runs with the
-# pids of this run's processes, twice a second, until it exits with anything but 1 ("not there
-# yet"). That output goes to <prefix>/<label>.reader.<n>, n counting the reads from 1. Then the
-# file is created; the program deletes it and goes on.
+# With GW2_TEST_READER=<native program> [<option>...], the program gets GW2_TEST_FLAG, a file to
+# wait for (tests/gw2/gw2test.h). Each time it prints the line "gw2 test ready", the reader runs
+# with the pids of this run's processes, twice a second and for 10 seconds at most each time,
+# while it exits 1 ("not there yet"). Its output goes to <prefix>/<label>.reader.<n>, n counting
+# the reads from 1. Exit 0 is a read; anything else fails the run, with the exit in that file.
+# Either way the file is created then, and the program deletes it and goes on.
 #
-# Afterwards the prefix's wineserver is stopped, and no process this script started may be left.
+# Afterwards the prefix's wineserver is stopped (30 seconds at most for each of its two calls), and
+# no process this script started may be left.
 # Wine rewrites a process's arguments, so the processes are found by a variable in their
 # environment, which every child and the wineserver inherit. Prints one line, and the log when the
 # run failed; exits 1 then.
@@ -40,9 +42,16 @@ run_limited() {
   perl -e 'alarm shift; exec @ARGV or die "exec: $!\n"' "$s" env "$mark" "$@" >"$out" 2>&1
 }
 
+# limited <seconds> <command>...: the command, killed by an alarm when it takes longer
+limited() {
+  local s=$1
+  shift
+  perl -e 'alarm shift; exec @ARGV or die "exec: $!\n"' "$s" "$@"
+}
+
 stop() {
-  "$wine/bin/wineserver" -k 2>/dev/null || true
-  "$wine/bin/wineserver" -w 2>/dev/null || true
+  limited 30 "$wine/bin/wineserver" -k 2>/dev/null || true
+  limited 30 "$wine/bin/wineserver" -w 2>/dev/null || true
 }
 
 # the pids of every process with the mark in its environment (macOS's ps -E prints it after the
@@ -52,10 +61,17 @@ marked() {
   print -l -- ${${lines## #}%% *}
 }
 
+# the program's log so far, without the carriage returns; nothing before the program has
+# created it (a failed redirection would end this script under err_exit)
+loglines() {
+  [[ -f $log ]] && tr -d '\r' <"$log"
+  return 0
+}
+
 # whether the program's log has the line <line> yet (grep without -q, which would end the pipe
 # early and fail it under pipe_fail)
 said() {
-  tr -d '\r' <"$log" 2>/dev/null | grep -xF -- "$1" >/dev/null
+  loglines | grep -xF -- "$1" >/dev/null
 }
 
 mkdir -p "$prefix"
@@ -82,7 +98,7 @@ if [[ -n ${GW2_TEST_READER:-} ]]; then
   # the reader finds the object
   while kill -0 $job 2>/dev/null; do
     if (( !waiting )); then
-      ready=(${(M)${(f)"$(tr -d '\r' <"$log" 2>/dev/null)"}:#gw2 test ready})
+      ready=(${(M)${(f)"$(loglines)"}:#gw2 test ready})
       if (( ${#ready} > reads )); then
         reads+=1
         waiting=1
@@ -90,8 +106,12 @@ if [[ -n ${GW2_TEST_READER:-} ]]; then
     fi
     if (( waiting )); then
       rr=0
-      "$GW2_TEST_READER" $(marked) >"$reader.$reads" 2>&1 || rr=$?
+      limited 10 ${=GW2_TEST_READER} $(marked) >"$reader.$reads" 2>&1 || rr=$?
       if (( rr != 1 )); then
+        if (( rr )); then
+          print "the reader exited $rr" >>"$reader.$reads"
+          failed=1
+        fi
         touch "$flag"
         waiting=0
       fi
@@ -99,17 +119,23 @@ if [[ -n ${GW2_TEST_READER:-} ]]; then
     sleep 0.5
   done
   wait $job || rc=$?
-  (( !waiting )) || print "the reader found no stats object for this read" >>"$reader.$reads"
+  if (( waiting )); then
+    print "the reader found no stats object for this read" >>"$reader.$reads"
+    failed=1
+  fi
 else
   run_limited "$secs" "$log" "$@" "$wine/bin/wine" "$exe" || rc=$?
 fi
 
-if (( rc == 0 )) && said "$want"; then
-  print "ok    $label"
-else
+if (( rc != 0 )) || ! said "$want"; then
   print "FAIL  $label (exit $rc$( (( rc == 142 )) && print ', the time limit' ))"
   sed 's/^/      /' "$log"
   failed=1
+elif (( failed )); then
+  print "FAIL  $label: a read failed"
+  sed 's/^/      /' "$prefix/$label".reader.*(N)
+else
+  print "ok    $label"
 fi
 
 stop
