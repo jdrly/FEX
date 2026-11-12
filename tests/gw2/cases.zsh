@@ -118,3 +118,33 @@ for mb in 16 128; do
   check smoke-default-$mb mine 40 fex.exe "$smoke" FEX_INITIALCODEBUFFERMB=$mb
   check smoke-smcchecks-full-$mb mine 160 fex.exe "$smoke" FEX_SMCCHECKS=full FEX_INITIALCODEBUFFERMB=$mb
 done
+
+# The watchdog's samples (jdrly/gw2-on-mac#132). hang.exe prints one line and sleeps for good, so
+# run.zsh has to fail it at its 20-second limit and leave <label>.hang.<pid>.log for each Wine
+# process of the run. It passes only when hang.exe got to its sleep and the sample of hang.exe itself
+# (the case's program, or a command naming hang.exe) has frames: "(in <image>)" from sample,
+# "frame #" from lldb. The lines under it name each sample and which tool gave it.
+hang_check() {
+  local out f head rc=0 files tools=() program=no slept=no
+  integer stacks=0
+  out=$("$here/run.zsh" "$wine" "$prefix" hang 20 'gw2 test hang: never' "$tests/hang.exe" 2>&1) || rc=$?
+  [[ -f $prefix/hang.log ]] && tr -d '\r' <"$prefix/hang.log" | grep -xF 'gw2 test hang: sleeping' >/dev/null && slept=yes
+  files=($prefix/hang.hang.<->.log(Nn))
+  for f in $files; do
+    head=$(head -n 1 "$f")
+    tools+=(${${(M)${(f)"$(<$f)"}:#tool: *}#tool: })
+    print -r -- "      ${f:t}: $head"
+    if grep -qE '\(in [^)]+\)|frame #[0-9]' "$f"; then
+      stacks+=1
+      [[ $head == *"(the case's program)"* || ${(L)head} == *hang.exe* ]] && program=yes
+    fi
+  done
+  if (( rc == 1 )) && [[ $slept == yes && $program == yes && $out == *'(exit 137, the time limit)'* && $out == *'where it stood: '* ]]; then
+    print "ok    hang: hang.exe's own sample has a stack; ${#files} samples, $stacks with frames, from ${(j:; :)${(@u)tools}}"
+  else
+    print "FAIL  hang: exit $rc, slept $slept, hang.exe's sample with frames $program, ${#files} samples, $stacks with frames"
+    print -r -- "$out" | sed 's/^/      /'
+    failed+=1
+  fi
+}
+if [[ $which == mine ]]; then hang_check; fi
