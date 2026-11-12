@@ -8,13 +8,17 @@
  *   - makes 100,000 calls into native code (GetTickCount, an ARM64EC export of kernel32 that makes
  *     no system call), each an exit from JIT code, and 1,000 Sleep(0), each an exit and a system
  *     call, so two hardware TSO switches where FEX switches them per thread. Read 2.
- *   - writes FUNCTIONS functions, each `mov eax, imm32; ret` on its own 16 bytes, into one
+ *   - writes FUNCTIONS functions, each `mov eax, imm32; ret` on its own 64 bytes, into one
  *     executable allocation, all before the first call, as tests/gw2/codebuf.c does (#112), and
  *     calls them through a pointer: one compile each, more host code than the 16 MB code buffer
  *     FEX starts with, so the thread moves to a new one. Then it calls them again for at least 3
- *     seconds. Each indirect call looks its target up in the thread's L1 cache; with far more
- *     targets than its 8,192 entries, most miss it and are found in L2 or L3, and over 250 such
- *     hits a second for a second make the dynamic L1 double. Read 3.
+ *     seconds. Each indirect call looks its target up in the thread's L1 cache, and with far more
+ *     targets than its 8,192 entries most miss it. The JIT's dispatcher then looks in L2 itself,
+ *     and only a miss there reaches the lookup in C++ that counts towards resizing the L1
+ *     (FEXCore/Source/Interface/Core/LookupCache.h, FindBlock). 64 bytes apart, the functions
+ *     span 3,072 pages of x86 code, more than the 2,048 that L2 holds, so it keeps clearing
+ *     itself and those lookups come by the thousand a second; over 250 a second for a second
+ *     make the dynamic L1 double. Read 3.
  *
  * Only the main thread does any of it. It prints
  *   gw2 test counters: tid <main thread id>
@@ -27,7 +31,7 @@
 
 #define THREADS 200
 #define FUNCTIONS 196608u
-#define STRIDE 16u
+#define STRIDE 64u
 
 typedef uint32_t (*function)(void);
 
