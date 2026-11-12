@@ -9,13 +9,14 @@
  * sampler then has to learn the new FEX's build id too (it refuses one it doesn't know).
  *
  * Only static_asserts: it adds no code, so the files built with it are the same.
- * Source/Windows/ARM64EC/Module.cpp includes it, last.
+ * Source/Windows/ARM64EC/Module.cpp includes it, last. The stats object's part is in
+ * GW2ContractStats.h, which the test stage's native reader includes as well.
  */
 #pragma once
 
 #include <FEXCore/Core/CoreState.h>
-#include <FEXCore/Utils/SHMStats.h>
 #include "Interface/Core/CPUBackend.h"
+#include "Windows/Common/GW2ContractStats.h"
 
 #include <cstddef>
 
@@ -24,8 +25,6 @@ using FEXCore::Core::CPUState;
 using FEXCore::Core::CpuStateFrame;
 using JITCodeHeader = FEXCore::CPU::CPUBackend::JITCodeHeader;
 using JITCodeTail = FEXCore::CPU::CPUBackend::JITCodeTail;
-using FEXCore::SHMStats::ThreadStats;
-using FEXCore::SHMStats::ThreadStatsHeader;
 
 // The thread's state: the CPU area's EmulatorData[0] points to a CpuStateFrame, whose first
 // member is CPUState.
@@ -55,35 +54,4 @@ static_assert(offsetof(JITCodeTail, OffsetToRIPEntries) == 28, "jdrly/wine heatp
 static_assert(sizeof(JITCodeTail::OffsetToRIPEntries) == 4, "jdrly/wine heatprof.h reads HEAT_FEX_TAIL_ENTRIES_AT as 4 bytes");
 static_assert(offsetof(JITCodeTail, SpinLockFutex) == 32, "jdrly/wine heatprof.h: HEAT_FEX_TAIL_ID has to follow");
 static_assert(sizeof(JITCodeTail) == 40, "jdrly/wine heatprof.h: HEAT_FEX_TAIL_COPY has to follow");
-
-// FEX_PROFILESTATS=1: fex-<pid>-stats, a ThreadStatsHeader and then ThreadStats slots.
-static_assert(FEXCore::SHMStats::STATS_VERSION == 2, "jdrly/wine heatprof.h: HEAT_FEX_STATS_VERSION has to follow");
-static_assert(sizeof(ThreadStatsHeader) == 64, "jdrly/wine heatprof.h: HEAT_FEX_STATS_HEADER has to follow");
-static_assert(offsetof(ThreadStatsHeader, Version) == 0, "jdrly/wine heatprof.h: HEAT_FEX_STATS_H_VERSION has to follow");
-static_assert(sizeof(ThreadStatsHeader::Version) == 1, "jdrly/wine heatprof.h reads HEAT_FEX_STATS_H_VERSION as 1 bytes");
-static_assert(offsetof(ThreadStatsHeader, ThreadStatsSize) == 2, "jdrly/wine heatprof.h: HEAT_FEX_STATS_H_SLOT has to follow");
-static_assert(sizeof(ThreadStatsHeader::ThreadStatsSize) == 2, "jdrly/wine heatprof.h reads HEAT_FEX_STATS_H_SLOT as 2 bytes");
-static_assert(offsetof(ThreadStatsHeader, Size) == 56, "jdrly/wine heatprof.h: HEAT_FEX_STATS_H_SIZE has to follow");
-static_assert(sizeof(ThreadStatsHeader::Size) == 4, "jdrly/wine heatprof.h reads HEAT_FEX_STATS_H_SIZE as 4 bytes");
-static_assert(sizeof(ThreadStats) == 112, "jdrly/wine heatprof.h: HEAT_FEX_STATS_SLOT has to follow");
-static_assert(offsetof(ThreadStats, TID) == 4, "jdrly/wine heatprof.h: HEAT_FEX_STATS_TID has to follow");
-static_assert(sizeof(ThreadStats::TID) == 4, "jdrly/wine heatprof.h reads HEAT_FEX_STATS_TID as 4 bytes");
-static_assert(offsetof(ThreadStats, AccumulatedJITTime) == 8, "jdrly/wine heatprof.h: HEAT_FEX_STATS_JIT_TIME has to follow");
-static_assert(sizeof(ThreadStats::AccumulatedJITTime) == 8, "jdrly/wine heatprof.h reads HEAT_FEX_STATS_JIT_TIME as 8 bytes");
-static_assert(offsetof(ThreadStats, AccumulatedSignalTime) == 16, "jdrly/wine heatprof.h: HEAT_FEX_STATS_SIG_TIME has to follow");
-static_assert(sizeof(ThreadStats::AccumulatedSignalTime) == 8, "jdrly/wine heatprof.h reads HEAT_FEX_STATS_SIG_TIME as 8 bytes");
-static_assert(offsetof(ThreadStats, AccumulatedSIGBUSCount) == 24, "jdrly/wine heatprof.h: HEAT_FEX_STATS_SIGBUS has to follow");
-static_assert(sizeof(ThreadStats::AccumulatedSIGBUSCount) == 8, "jdrly/wine heatprof.h reads HEAT_FEX_STATS_SIGBUS as 8 bytes");
-static_assert(offsetof(ThreadStats, AccumulatedSMCCount) == 32, "jdrly/wine heatprof.h: HEAT_FEX_STATS_SMC has to follow");
-static_assert(sizeof(ThreadStats::AccumulatedSMCCount) == 8, "jdrly/wine heatprof.h reads HEAT_FEX_STATS_SMC as 8 bytes");
-static_assert(offsetof(ThreadStats, AccumulatedFloatFallbackCount) == 40, "jdrly/wine heatprof.h: HEAT_FEX_STATS_FLOAT has to follow");
-static_assert(sizeof(ThreadStats::AccumulatedFloatFallbackCount) == 8, "jdrly/wine heatprof.h reads HEAT_FEX_STATS_FLOAT as 8 bytes");
-static_assert(offsetof(ThreadStats, AccumulatedCacheMissCount) == 48, "jdrly/wine heatprof.h: HEAT_FEX_STATS_MISS has to follow");
-static_assert(sizeof(ThreadStats::AccumulatedCacheMissCount) == 8, "jdrly/wine heatprof.h reads HEAT_FEX_STATS_MISS as 8 bytes");
-static_assert(offsetof(ThreadStats, AccumulatedCacheReadLockTime) == 56, "jdrly/wine heatprof.h: HEAT_FEX_STATS_RLOCK has to follow");
-static_assert(sizeof(ThreadStats::AccumulatedCacheReadLockTime) == 8, "jdrly/wine heatprof.h reads HEAT_FEX_STATS_RLOCK as 8 bytes");
-static_assert(offsetof(ThreadStats, AccumulatedCacheWriteLockTime) == 64, "jdrly/wine heatprof.h: HEAT_FEX_STATS_WLOCK has to follow");
-static_assert(sizeof(ThreadStats::AccumulatedCacheWriteLockTime) == 8, "jdrly/wine heatprof.h reads HEAT_FEX_STATS_WLOCK as 8 bytes");
-static_assert(offsetof(ThreadStats, AccumulatedJITCount) == 72, "jdrly/wine heatprof.h: HEAT_FEX_STATS_JIT_COUNT has to follow");
-static_assert(sizeof(ThreadStats::AccumulatedJITCount) == 8, "jdrly/wine heatprof.h reads HEAT_FEX_STATS_JIT_COUNT as 8 bytes");
 } // namespace GW2Contract
