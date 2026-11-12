@@ -21,9 +21,9 @@ struct CpuStateFrame;
 // is harmless and only costs a redundant trap at the next entry into JIT code.
 //
 // On ARM64EC, HardwareTSOSyscalls says where "real work" starts. With switch (the default), a thread is switched off
-// before every guest syscall and unix call. With keep, only before unix calls: a thread that is on stays on through a
-// syscall, so ntdll's unix side and win32u.so run under TSO, which is correct and slower for that code, and the next
-// entry into JIT code finds it On and makes no trap. Only FEX issues the trap, Wine's unix side never does, so the rule
+// before every guest syscall and unix call. With keep, only before unix calls: a syscall leaves the thread as it is,
+// so ntdll's unix side and win32u.so can run under TSO, which is correct and slower for that code, and the next entry
+// into JIT code finds it On and makes no trap. Only FEX issues the trap, Wine's unix side never does, so the rule
 // above holds in both modes. The WOW64 module ignores the option.
 namespace FEX::Windows::HardwareTSO {
 enum class State : uint32_t {

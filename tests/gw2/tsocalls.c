@@ -1,7 +1,7 @@
 /* gw2 (jdrly/gw2-on-mac#113): what a guest syscall costs with FEX_HARDWARETSOSYSCALLS=switch and
  * with keep. A Win64 x86_64 program, built with llvm-mingw.
  *
- *   tsocalls.exe [<iterations> [<file>]]
+ *   tsocalls.exe [<iterations>]
  *
  * Three loops, each on a thread of its own, one after the other, <iterations> each (ten million
  * by default):
@@ -17,14 +17,12 @@
  *
  *   gw2 test tsocalls: <loop> thread <tid> <ns> ns per iteration
  *
- * With <file>, the three threads stay alive after their loops until <file> exists (a Windows path;
- * Z:\ is the Mac's root), so a native reader of FEX's stats object (FEX_PROFILESTATS=1) can take
- * each thread's trap count from its slot, found by <tid>. It prints
- * "gw2 test tsocalls: waiting for <file>" once all three loops are done, and waits two minutes at
- * most. It ends with "gw2 test tsocalls: passed". */
-#include <stdio.h>
-#include <stdlib.h>
-#include <windows.h>
+ * Under tests/gw2/run.zsh (GW2_TEST_FLAG set), the three threads stay alive after their loops
+ * until its reader of FEX's stats object (FEX_PROFILESTATS=1) has read once, so each thread's trap
+ * count is in its slot, found by <tid>. Without GW2_TEST_FLAG, as in a run by hand, it doesn't
+ * wait. It ends with "gw2 test tsocalls: passed". */
+#include "gw2test.h"
+
 #include <winternl.h>
 #include <x86intrin.h>
 
@@ -92,11 +90,11 @@ int main(int argc, char **argv)
     LARGE_INTEGER freq, q0, q1;
     unsigned long long t0, t1;
     HMODULE ntdll = GetModuleHandleA("ntdll.dll");
-    const char *file = argc > 2 ? argv[2] : NULL;
+    int reader = getenv("GW2_TEST_FLAG") != NULL;
 
-    if (argc > 3 || (argc > 1 && !(iterations = strtoull(argv[1], NULL, 10))))
+    if (argc > 2 || (argc == 2 && !(iterations = strtoull(argv[1], NULL, 10))))
     {
-        printf("gw2 test tsocalls: usage: tsocalls.exe [<iterations> [<file>]]\n");
+        printf("gw2 test tsocalls: usage: tsocalls.exe [<iterations>]\n");
         return 2;
     }
     rtl_get_current_peb = (peb_fn)GetProcAddress(ntdll, "RtlGetCurrentPeb");
@@ -122,7 +120,7 @@ int main(int argc, char **argv)
     ns_per_tick = (double)(q1.QuadPart - q0.QuadPart) * 1e9 / (double)freq.QuadPart / (double)(t1 - t0);
     printf("gw2 test tsocalls: %llu iterations a loop, rdtsc at %.1f MHz\n", iterations, 1e3 / ns_per_tick);
 
-    if (file && !(release = CreateEventA(NULL, TRUE, FALSE, NULL)))
+    if (reader && !(release = CreateEventA(NULL, TRUE, FALSE, NULL)))
     {
         printf("gw2 test tsocalls: CreateEvent failed (%lu)\n", GetLastError());
         return 1;
@@ -141,23 +139,12 @@ int main(int argc, char **argv)
         fflush(stdout);
     }
 
-    if (file)
+    if (reader)
     {
-        int found = 0;
-        printf("gw2 test tsocalls: waiting for %s\n", file);
-        fflush(stdout);
-        for (int i = 0; i < 1200 && !found; i++)
-        {
-            found = GetFileAttributesA(file) != INVALID_FILE_ATTRIBUTES;
-            if (!found)
-                Sleep(100);
-        }
+        int rc = gw2_test_wait_for_reader();
         SetEvent(release);
-        if (!found)
-        {
-            printf("gw2 test tsocalls: %s never came\n", file);
+        if (rc)
             return 1;
-        }
     }
     WaitForMultipleObjects(3, threads, TRUE, INFINITE);
     printf("gw2 test tsocalls: passed\n");
