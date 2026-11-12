@@ -35,18 +35,27 @@ unset WINEARCH
 mark=GW2_TEST_RUN=$$-${label//[^A-Za-z0-9]/_}
 log=$prefix/$label.log
 
-# run_limited <seconds> <log> <command>...: Mach9's, with perl's alarm since macOS has no timeout
+# limited <seconds> <command>...: the command, killed with SIGKILL (exit 137) when it runs longer.
+# A watchdog process of its own does it, not an alarm in the command as in Mach9's run_limited:
+# Wine blocks SIGALRM while it waits for the wineserver, so a stalled server would outlast one.
+limited() {
+  local s=$1 pid dog rc=0
+  shift
+  "$@" &
+  pid=$!
+  perl -e 'sleep shift; kill "KILL", shift' "$s" $pid &
+  dog=$!
+  wait $pid || rc=$?
+  kill $dog 2>/dev/null || true
+  wait $dog 2>/dev/null || true
+  return $rc
+}
+
+# run_limited <seconds> <log> <command>...: the command with this run's mark, its output in <log>
 run_limited() {
   local s=$1 out=$2
   shift 2
-  perl -e 'alarm shift; exec @ARGV or die "exec: $!\n"' "$s" env "$mark" "$@" >"$out" 2>&1
-}
-
-# limited <seconds> <command>...: the command, killed by an alarm when it takes longer
-limited() {
-  local s=$1
-  shift
-  perl -e 'alarm shift; exec @ARGV or die "exec: $!\n"' "$s" "$@"
+  limited "$s" env "$mark" "$@" >"$out" 2>&1
 }
 
 stop() {
@@ -128,7 +137,7 @@ else
 fi
 
 if (( rc != 0 )) || ! said "$want"; then
-  print "FAIL  $label (exit $rc$( (( rc == 142 )) && print ', the time limit' ))"
+  print "FAIL  $label (exit $rc$( (( rc == 137 )) && print ', the time limit' ))"
   sed 's/^/      /' "$log"
   failed=1
 elif (( failed )); then
