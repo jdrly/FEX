@@ -17,3 +17,79 @@ report hardware-tso smoke-log '*FEX: Using hardware TSO*'
 
 # Which FEX ran: its version in the header of its stats object
 version fex-version both 120 wait.exe 'gw2 test wait: passed'
+
+# My FEX's counters (jdrly/gw2-on-mac#117), only under mine: the engine's FEX has no such fields,
+# and on macOS it gives no slot to a thread after its first page's worth. counters.exe
+# (tests/gw2/counters.c) starts 200 threads (read 1), exits into native code 101,000 times with
+# 1,000 system calls among them (read 2), then outgrows the first code buffer and calls its code
+# until the dynamic L1 has grown (read 3). Only its main thread does any of it, so its counts
+# between two reads are that phase's, plus what the waits for the reader cost: a few dozen calls a
+# second. With FEX_DYNAMICL1CACHE=0 the L1 never resizes.
+counters='gw2 test counters: passed'
+counted='thread <->: * code_buffer_moves=<1-> l1_resizes='
+
+# counter <read> <thread id> <field>: the field's value in that thread's line of that read of the
+# case, or -1 when there is none
+counter() {
+  local f=$prefix/$1 line=
+  [[ -f $f ]] && line=${(M)${(f)"$(<$f)"}:#thread $2: *}
+  if [[ $line == (#b)*\ $3=(<->)(|\ *) ]]; then print -- $match[1]; else print -- -1; fi
+}
+
+# delta <label> <from read> <to read> <thread id> <field>: how much the field grew between the two
+# reads, or -1 when one has no such line
+delta() {
+  local a=$(counter "$1.reader.$2" "$4" "$5") b=$(counter "$1.reader.$3" "$4" "$5")
+  if (( a < 0 || b < 0 )); then print -- -1; else print -- $(( b - a )); fi
+}
+
+# verdict <label> <ok or not> <what>
+verdict() {
+  if [[ $2 == ok ]]; then
+    print "ok    $1: $3"
+  else
+    print "FAIL  $1: $3"
+    failed+=1
+  fi
+}
+
+# counters_check <label> <l1 resizes>: what the reads of that case have to show beyond its
+# pattern, <l1 resizes> being a zsh pattern for the main thread's L1 resizes in phase 3
+counters_check() {
+  local label=$1 l1=$2 main tid r exits traps moves resizes log=()
+  [[ -f $prefix/$label.log ]] && log=(${(f)"$(tr -d '\r' <"$prefix/$label.log")"})
+  main=${${(M)log:#gw2 test counters: tid *}##* }
+  local workers=(${=${(M)log:#gw2 test counters: workers *}#gw2 test counters: workers})
+  integer missing=0
+  # every one of the 200 has a slot
+  for tid in $workers; do
+    (( $(counter "$label.reader.1" "$tid" tso_switches) >= 0 )) || missing+=1
+  done
+  (( ${#workers} == 200 && missing == 0 )) && r=ok || r=no
+  verdict $label-slots $r "${#workers} threads named, $missing of them without a slot"
+  # phase 2 on the main thread: 101,000 exits; two switches for each Sleep(0) where FEX switches
+  # hardware TSO per thread, none without it
+  exits=$(delta $label 1 2 "$main" native_exits)
+  traps=$(delta $label 1 2 "$main" tso_switches)
+  (( exits >= 101000 && exits <= 106000 )) && r=ok || r=no
+  verdict $label-exits $r "$exits exits into native code in phase 2, wanted 101,000 to 106,000"
+  if [[ $(<$prefix/hardware-tso) == yes ]]; then
+    (( traps >= 2000 && traps <= 2600 )) && r=ok || r=no
+    verdict $label-tso $r "$traps hardware TSO switches in phase 2, wanted 2,000 to 2,600"
+  else
+    (( traps == 0 )) && r=ok || r=no
+    verdict $label-tso $r "$traps hardware TSO switches in phase 2, wanted 0 without per-thread hardware TSO"
+  fi
+  # phase 3: at least one move to a new code buffer, and the L1 resizes
+  moves=$(delta $label 2 3 "$main" code_buffer_moves)
+  resizes=$(delta $label 2 3 "$main" l1_resizes)
+  (( moves >= 1 )) && r=ok || r=no
+  verdict $label-moves $r "$moves code buffer moves in phase 3, wanted 1 or more"
+  [[ $resizes == $~l1 ]] && r=ok || r=no
+  verdict $label-l1 $r "$resizes L1 resizes in phase 3, wanted $l1"
+}
+
+stats counters mine 300 counters.exe "$counters" "$counted<1->"
+if [[ $which == mine ]]; then counters_check counters '<1->'; fi
+stats counters-l1-fixed mine 300 counters.exe "$counters" "${counted}0" FEX_DYNAMICL1CACHE=0
+if [[ $which == mine ]]; then counters_check counters-l1-fixed 0; fi
