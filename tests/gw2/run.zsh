@@ -13,15 +13,17 @@
 #
 # With GW2_TEST_READER=<native program> [<option>...], the program gets GW2_TEST_FLAG, a file to
 # wait for (tests/gw2/gw2test.h). Each time it prints the line "gw2 test ready", the reader runs
-# with the pids of this run's processes, twice a second and for 10 seconds at most each time,
+# with the pids of this run's processes (see below), twice a second and for 10 seconds at most each time,
 # while it exits 1 ("not there yet"). Its output goes to <prefix>/<label>.reader.<n>, n counting
 # the reads from 1. Exit 0 is a read; anything else fails the run, with the exit in that file.
 # Either way the file is created then, and the program deletes it and goes on.
 #
 # Afterwards the prefix's wineserver is stopped (30 seconds at most for each of its two calls), and
 # no process this script started may be left.
-# Wine rewrites a process's arguments, so the processes are found by a variable in their
-# environment, which every child and the wineserver inherit. Prints one line, and the log when the
+# This run's processes are the ones of this user that weren't there when the script started, and
+# those with a variable of this run in their environment. The variable alone doesn't do: on the
+# runner, ps -E showed it for none of Wine's processes (run 43297396698), as Wine rewrites what
+# ps reads there. A process left behind is one of them whose command names Wine or an .exe. Prints one line, and the log when the
 # run failed; exits 1 then.
 emulate -L zsh
 setopt err_exit pipe_fail no_unset extended_glob
@@ -70,6 +72,26 @@ marked() {
   print -l -- ${${lines## #}%% *}
 }
 
+# this user's processes now
+mine_now() {
+  ps -o pid= -U "$(id -u)" | tr -d ' '
+}
+before=(${(f)"$(mine_now)"})
+
+# the pids of this run's processes: the ones since the script started, and the marked ones
+started() {
+  local now=(${(f)"$(mine_now)"})
+  print -l -- ${(u)${now:|before}} $(marked)
+}
+
+# pid and command of this run's processes whose command names Wine or an .exe, but not this
+# script and its subshells, whose command line names the engine
+winelike() {
+  local pids=($(started))
+  (( ${#pids} )) || return 0
+  ps -ww -o pid=,command= -p ${(j:,:)pids} 2>/dev/null | grep -iE 'wine|\.exe' | grep -v '/run\.zsh' || true
+}
+
 # the program's log so far, without the carriage returns; nothing before the program has
 # created it (a failed redirection would end this script under err_exit)
 loglines() {
@@ -114,8 +136,9 @@ if [[ -n ${GW2_TEST_READER:-} ]]; then
       fi
     fi
     if (( waiting )); then
+      diag=$(winelike)
       rr=0
-      limited 10 ${=GW2_TEST_READER} $(marked) >"$reader.$reads" 2>&1 || rr=$?
+      limited 10 ${=GW2_TEST_READER} $(started) >"$reader.$reads" 2>&1 || rr=$?
       if (( rr != 1 )); then
         if (( rr )); then
           print "the reader exited $rr" >>"$reader.$reads"
@@ -129,7 +152,10 @@ if [[ -n ${GW2_TEST_READER:-} ]]; then
   done
   wait $job || rc=$?
   if (( waiting )); then
-    print "the reader found no stats object for this read" >>"$reader.$reads"
+    {
+      print "the reader found no stats object for this read; this run's processes then:"
+      print -r -- "$diag"
+    } >>"$reader.$reads"
     failed=1
   fi
 else
@@ -148,10 +174,11 @@ else
 fi
 
 stop
-left=($(marked))
+left=(${(f)"$(winelike)"})
 if (( ${#left} )); then
-  print "FAIL  $label: processes left behind: ${left[*]}"
-  kill -9 $left 2>/dev/null || true
+  print "FAIL  $label: processes left behind:"
+  print -l -- "      "${^left}
+  kill -9 ${${left## #}%% *} 2>/dev/null || true
   failed=1
 fi
 (( failed == 0 ))

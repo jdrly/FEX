@@ -448,7 +448,10 @@ jobs:
         if: ${{ !cancelled() && steps.engines.outcome == 'success' }}
         with:
           name: engine-tests-${{ env.COMMIT }}
-          path: ${{ runner.temp }}/engine-tests
+          # the logs and reads only: a prefix's dosdevices/z: is the whole disk
+          path: |
+            ${{ runner.temp }}/engine-tests/*/*.log
+            ${{ runner.temp }}/engine-tests/*/*.reader.*
           retention-days: 7
 
       # callret_sp moved one slot (swapped with _pad1, so FEX's own asserts hold): GW2Contract.h has
@@ -538,7 +541,7 @@ jobs:
             local name=$1 regex=$2 rc=0 total failed
             shift 2
             rm -f build/Testing/Temporary/LastTestsFailed.log
-            (cd build && env "$@" ctest --no-tests=error --timeout 302 -j"$(nproc)" -R "$regex" >"$out/$name.log" 2>&1) || rc=$?
+            (cd build && env "$@" ctest --no-tests=error --output-on-failure --timeout 302 -j"$(nproc)" -R "$regex" >"$out/$name.log" 2>&1) || rc=$?
             total=$(grep -oE '[0-9]+ tests? failed out of [0-9]+' "$out/$name.log" | tail -n 1 || true)
             echo "$name: ctest exit $rc, ${total:-no total}" | tee -a "$out/totals"
             sed -n 's/^[0-9]*:/'"$name"' /p' build/Testing/Temporary/LastTestsFailed.log 2>/dev/null >"$out/$name.failed" || true
