@@ -93,3 +93,28 @@ stats counters mine 300 counters.exe "$counters" "$counted<1->"
 if [[ $which == mine ]]; then counters_check counters '<1->'; fi
 stats counters-l1-fixed mine 300 counters.exe "$counters" "${counted}0" FEX_DYNAMICL1CACHE=0
 if [[ $which == mine ]]; then counters_check counters-l1-fixed 0; fi
+
+# The first code buffer's size, FEX_INITIALCODEBUFFERMB (jdrly/gw2-on-mac#112). codebuf.exe
+# compiles more code than 16 MB holds and runs it twice, with a read of FEX's stats after each
+# pass; codebuf_check.py judges the two reads. Unset, pass 2 compiles at least 20% of it again.
+# At 128 one buffer holds both passes. An invalid value logs one error and acts as unset.
+# FEX_SILENTLOG=0 shows that 128 logs no error and 100 logs one (__wine_dbg_output doesn't go
+# through WINEDEBUG's channels). All of it runs under mine only: the engine's FEX doesn't know the
+# variable, and the cases read the stats slots, which only my FEX's layout is sure to match.
+codebuf() {
+  local label=$1 mode=$2 engines=$3
+  shift 3
+  applies $engines || return 0
+  stats $label $engines 600 codebuf.exe 'codebuf: passed' 'thread <->: *jit_count=<->*' "$@"
+  python3 -I "$here/codebuf_check.py" $mode "$prefix/$label.log" "$prefix/$label.reader.1" "$prefix/$label.reader.2" ||
+    failed+=1
+}
+codebuf codebuf-unset discard mine
+codebuf codebuf-128 keep mine FEX_INITIALCODEBUFFERMB=128 FEX_SILENTLOG=0
+codebuf codebuf-invalid invalid mine FEX_INITIALCODEBUFFERMB=100 FEX_SILENTLOG=0
+
+# Mach9's smoke test in both modes with the option at 16 and at 128
+for mb in 16 128; do
+  check smoke-default-$mb mine 40 fex.exe "$smoke" FEX_INITIALCODEBUFFERMB=$mb
+  check smoke-smcchecks-full-$mb mine 160 fex.exe "$smoke" FEX_SMCCHECKS=full FEX_INITIALCODEBUFFERMB=$mb
+done
