@@ -11,13 +11,14 @@
  *   - writes FUNCTIONS functions, each `mov eax, imm32; ret` on its own 64 bytes, into one
  *     executable allocation, all before the first call, as tests/gw2/codebuf.c does (#112), and
  *     calls them through a pointer: one compile each, more host code than the 16 MB code buffer
- *     FEX starts with, so the thread moves to a new one. Then it calls them again for at least 3
- *     seconds. Each indirect call looks its target up in the thread's L1 cache, and with far more
- *     targets than its 8,192 entries most miss it. The JIT's dispatcher then looks in L2 itself,
+ *     FEX starts with, so the thread moves to a new one. A second pass compiles again what the
+ *     move took away. Then, all of it compiled, it calls them again for at least 3 seconds. Each
+ *     indirect call looks its target up in the thread's L1 cache, and with far more targets than
+ *     its 8,192 entries most miss it. The JIT's dispatcher then looks in L2 itself,
  *     and only a miss there reaches the lookup in C++ that counts towards resizing the L1
  *     (FEXCore/Source/Interface/Core/LookupCache.h, FindBlock). 64 bytes apart, the functions
- *     span 3,072 pages of x86 code, more than the 2,048 that L2 holds, so it keeps clearing
- *     itself and those lookups come by the thousand a second; over 250 a second for a second
+ *     span 3,072 pages of x86 code, more than the 2,047 that L2 holds, so it keeps clearing
+ *     itself and those lookups keep coming; over 250 a second for a second
  *     make the dynamic L1 double. Read 3.
  *
  * Only the main thread does any of it. It prints
@@ -117,13 +118,14 @@ int main(void)
     }
     FlushInstructionCache(GetCurrentProcess(), code, (size_t)FUNCTIONS * STRIDE);
     first = pass(code);
+    ok &= pass(code) == first;
     start = GetTickCount64();
     do
     {
         ok &= pass(code) == first;
         passes++;
     } while (GetTickCount64() - start < 3000);
-    printf("gw2 test counters: %d passes after the first, %s\n", passes, ok ? "same sums" : "different sums");
+    printf("gw2 test counters: %d passes in 3 seconds after the first two, %s\n", passes, ok ? "same sums" : "different sums");
     ok &= !gw2_test_wait_for_reader();
 
     /* the threads end with the process */
