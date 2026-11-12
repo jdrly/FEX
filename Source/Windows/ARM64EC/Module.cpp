@@ -481,7 +481,8 @@ bool InitSyscalls() {
 // them on again. Only the *Native syscalls (WineSyscallDispatcher) and FEX's unix calls (UnixLib::Init) bypass these
 // hooks. FEX's other syscalls go through them and leave the thread on only because InSimulation is set while FEX runs
 // inside JIT execution: code that makes an ntdll call and then resumes JIT code without an entry point must keep
-// InSimulation set (see TSOSyscallDispatcher in Module.S).
+// InSimulation set (see TSOSyscallDispatcher in Module.S). With HardwareTSOSyscalls=keep only the unix call hook is
+// installed, and syscalls leave the thread as it is.
 void InstallHardwareTSOHooks(HMODULE NtDll) {
   if (!FEX::Windows::HardwareTSO::PerThread()) {
     return;
@@ -489,7 +490,10 @@ void InstallHardwareTSOHooks(HMODULE NtDll) {
 
   // Both are writable ntdll data that the ARM64EC syscall and unix call thunks load on every call. Modules that copy
   // them before this point bypass the hooks, which only keeps their threads on longer.
-  if (const auto Ptr = reinterpret_cast<void**>(GetProcAddress(NtDll, "__wine_syscall_dispatcher"))) {
+  FEX_CONFIG_OPT(HardwareTSOSyscalls, HARDWARETSOSYSCALLS);
+  if (HardwareTSOSyscalls() == FEXCore::Config::CONFIG_HARDWARETSOSYSCALLS_KEEP) {
+    LogMan::Msg::IFmt("FEX: Keeping hardware TSO across syscalls");
+  } else if (const auto Ptr = reinterpret_cast<void**>(GetProcAddress(NtDll, "__wine_syscall_dispatcher"))) {
     TSOOrigSyscallDispatcher = *Ptr;
     *Ptr = &TSOSyscallDispatcher;
   }

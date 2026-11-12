@@ -19,6 +19,12 @@ struct CpuStateFrame;
 // Module.S change it, so that it is never On while the thread is off: On is stored only after a successful trap that
 // switches the thread on, and Off is stored before the trap that switches it off. The reverse mismatch (on, but Off)
 // is harmless and only costs a redundant trap at the next entry into JIT code.
+//
+// On ARM64EC, HardwareTSOSyscalls says where "real work" starts. With switch (the default), a thread is switched off
+// before every guest syscall and unix call. With keep, only before unix calls: a thread that is on stays on through a
+// syscall, so ntdll's unix side and win32u.so run under TSO, which is correct and slower for that code, and the next
+// entry into JIT code finds it On and makes no trap. Only FEX issues the trap, Wine's unix side never does, so the rule
+// above holds in both modes. The WOW64 module ignores the option.
 namespace FEX::Windows::HardwareTSO {
 enum class State : uint32_t {
   // Hardware TSO is in use and the thread is off. It must be switched on before running JIT code.

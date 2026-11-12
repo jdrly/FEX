@@ -621,6 +621,18 @@
           "Highly likely to break any multithreaded application if disabled."
         ]
       },
+      "HardwareTSOSyscalls": {
+        "Type": "uint8",
+        "Default": "FEXCore::Config::CONFIG_HARDWARETSOSYSCALLS_SWITCH",
+        "AffectsCodeGen": "false",
+        "TextDefault": "switch",
+        "ArgumentHandler": "HardwareTSOSyscallsHandler",
+        "Desc": [
+          "ARM64EC with hardware TSO switched per thread (macOS) only: what a thread does at a guest syscall.",
+          "\tswitch: Switch the thread off hardware TSO before the syscall (default)",
+          "\tkeep: Leave the thread on, which saves two traps per syscall. Unix calls still switch it off"
+        ]
+      },
       "VectorTSOEnabled": {
         "Type": "bool",
         "Default": "false",

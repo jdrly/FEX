@@ -190,6 +190,9 @@ ExitFunctionSuspendPoint:
   // and x10-x17 are free as the originals overwrite them. The stack pointer is 16-byte aligned as these are called
   // from ARM64EC code. There is no unwind information: nothing can raise an exception here, and only a stack walk of
   // a thread suspended at the trap would see the caller's stack pointer 0x70 off, as with ExitFunctionEC.
+  // With HardwareTSOSyscalls=keep, TSOSyscallDispatcher is not installed: a thread that is On stays on, with its state
+  // On, while ntdll's unix side handles the syscall, including win32u.so and the drivers it calls and any callback
+  // into PE code. That code is correct under TSO, only slower. TSOUnixCallDispatcher is installed in both modes.
 .macro TSO_DISPATCHER_WRAPPER Name, Orig
 .global \Name
 \Name:
