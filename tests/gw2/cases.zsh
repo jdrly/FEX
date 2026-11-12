@@ -148,3 +148,71 @@ hang_check() {
   fi
 }
 if [[ $which == mine ]]; then hang_check; fi
+
+# jdrly/gw2-on-mac#113: FEX_HARDWARETSOSYSCALLS, switch (the default) and keep. The engine's FEX
+# doesn't know the option, and its stats slots have no trap count, so these run under mine only.
+# tso-keep says whether keep took effect: FEX logs it only when threads are switched one by one,
+# so it has to agree with hardware-tso.
+check smoke-tso-switch mine 40 fex.exe "$smoke" FEX_HARDWARETSOSYSCALLS=switch
+check smoke-tso-keep mine 40 fex.exe "$smoke" FEX_HARDWARETSOSYSCALLS=keep
+check smoke-tso-keep-smcchecks-full mine 160 fex.exe "$smoke" FEX_HARDWARETSOSYSCALLS=keep FEX_SMCCHECKS=full
+check smoke-tso-keep-log mine 40 fex.exe "$smoke" FEX_HARDWARETSOSYSCALLS=keep FEX_SILENTLOG=0 WINEDEBUG=
+if [[ $which == mine ]]; then report tso-keep smoke-tso-keep-log '*FEX: Keeping hardware TSO across syscalls*'; fi
+
+# Four threads in a ring of fence-free queues for 60 seconds, a syscall on every pass
+check tsoqueue-switch mine 150 tsoqueue.exe 'gw2 test tsoqueue: passed' FEX_HARDWARETSOSYSCALLS=switch
+check tsoqueue-keep mine 150 tsoqueue.exe 'gw2 test tsoqueue: passed' FEX_HARDWARETSOSYSCALLS=keep
+
+# tsocalls_traps <label> <mode>: the trap count of each of tsocalls.exe's loop threads, per
+# iteration, from <label>.log's thread ids and the last read of <label>.reader.<n>. With hardware
+# TSO: under switch about two per iteration of close and qpc (1.9 to 2.1), under keep fewer than
+# one per 1,000; the native loop fewer than one per 1,000 in both. Without it every count is 0.
+# tso_field is fexstats's name for the count (#117), one per trap.
+tso_field=tso_switches tsocalls_iterations=1000000
+tsocalls_traps() {
+  [[ $which == mine ]] || return 0
+  local label=$1 mode=$2 hw=no keep=no loop line tid traps want ok=1 said=()
+  [[ -f $prefix/hardware-tso ]] && hw=$(<$prefix/hardware-tso)
+  [[ -f $prefix/tso-keep ]] && keep=$(<$prefix/tso-keep)
+  local reads=($prefix/$label.reader.<->(Nn))
+  local log=(${(f)"$(tr -d '\r' <"$prefix/$label.log")"})
+  local last=(${(f)"$( (( ${#reads} )) && cat "$reads[-1]")"})
+  if [[ $keep != "$hw" ]]; then
+    print "FAIL  $label-traps: keep took effect: $keep, hardware TSO: $hw"
+    failed+=1
+    return 0
+  fi
+  integer n=$tsocalls_iterations
+  for loop in native close qpc; do
+    line=${log[(r)gw2 test tsocalls: $loop thread *]}
+    tid=${${line#*thread }%% *}
+    line=${last[(r)thread $tid: *]}
+    traps=
+    [[ $line == *" $tso_field="<->(|" "*) ]] && traps=${${line#* $tso_field=}%% *}
+    if [[ -z $tid || -z $traps ]]; then
+      print "FAIL  $label-traps: no $tso_field for the $loop loop's thread ${tid:-?}"
+      failed+=1
+      return 0
+    fi
+    said+=("$loop $traps")
+    if [[ $hw != yes ]]; then
+      (( traps == 0 )) || ok=0
+    elif [[ $mode == switch && $loop != native ]]; then
+      (( 10 * traps >= 19 * n && 10 * traps <= 21 * n )) || ok=0
+    else
+      (( 1000 * traps < n )) || ok=0
+    fi
+  done
+  if (( ok )); then
+    print "ok    $label-traps: $n iterations, hardware TSO $hw, traps: ${(j:, :)said}"
+  else
+    print "FAIL  $label-traps: $n iterations, hardware TSO $hw, traps: ${(j:, :)said}"
+    failed+=1
+  fi
+}
+stats tsocalls-switch mine 300 tsocalls.exe 'gw2 test tsocalls: passed' 'thread <->: *' \
+  FEX_HARDWARETSOSYSCALLS=switch GW2_TSOCALLS_ITERATIONS=$tsocalls_iterations
+tsocalls_traps tsocalls-switch switch
+stats tsocalls-keep mine 300 tsocalls.exe 'gw2 test tsocalls: passed' 'thread <->: *' \
+  FEX_HARDWARETSOSYSCALLS=keep GW2_TSOCALLS_ITERATIONS=$tsocalls_iterations
+tsocalls_traps tsocalls-keep keep

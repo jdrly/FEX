@@ -31,6 +31,12 @@ namespace Handler {
     }
     return "0";
   }
+  static inline std::optional<fextl::string> HardwareTSOSyscallsHandler(std::string_view Value) {
+    if (Value == "keep") {
+      return "1";
+    }
+    return "0";
+  }
 } // namespace Handler
 
 enum ConfigOption {
@@ -46,6 +52,11 @@ enum ConfigSMCChecks {
   CONFIG_SMC_NONE,
   CONFIG_SMC_MTRACK,
   CONFIG_SMC_FULL,
+};
+
+enum ConfigHardwareTSOSyscalls {
+  CONFIG_HARDWARETSOSYSCALLS_SWITCH,
+  CONFIG_HARDWARETSOSYSCALLS_KEEP,
 };
 
 enum class LayerType {
