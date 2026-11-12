@@ -3,7 +3,7 @@
 # engine, and a later commit's objects with my build of the engine's commit. It reads files and
 # runs nothing.
 #
-#   compare.py baseline <mine> <engine>
+#   compare.py baseline <mine> <engine> [strict | structural]
 #   compare.py record <record dir> <source dir> <build dir> [<since>]
 #   compare.py patched <mine> <engine> <base record> <head record> [<changed path>...]
 #   compare.py info <dll>
@@ -15,14 +15,22 @@
 #
 # baseline: my build of the engine's commit (fex.zsh build). For each of the four files: the
 #   exports and imports are the engine's, and the bytes are:
-#   - a .so: the byte gate of jdrly/wine's compare.py (byte_gate: the header, every section of
-#     every loaded segment, the load commands and the link edit data);
-#   - a DLL: every byte, with the COFF header's TimeDateStamp and each debug directory entry's
+#   - a .so, with the strict gate (the default, for a build with the engine's Xcode): the byte
+#     gate of jdrly/wine's compare.py (byte_gate: the header, every section of every loaded
+#     segment, the load commands and the link edit data);
+#   - a .so, with the structural gate (for another Xcode, whose clang can't give the engine's
+#     bytes): the engine's install name, rpaths, libraries, minos, segments and sections (names,
+#     order, kinds), and the same functions by name. Which functions differ in their bytes, with
+#     branch and address immediates masked, is a report and fails nothing;
+#   - a DLL, with either gate, since llvm-mingw builds it: every byte, with the COFF header's
+#     TimeDateStamp and each debug directory entry's
 #     masked, since LLD writes the link time there. The build id (the CodeView record's GUID and
 #     age, LLD's hash of the image without those times) is a line of its own.
 #   Where a DLL's bytes differ, the report lists the sections that differ and the functions,
 #   through .pdata, with branch and address immediates masked, named from my unstripped build's
 #   COFF symbols. That listing is not the gate: it never passes or fails anything.
+#   The report's last lines before the verdict are "baseline: <file> <which gate held>, …", for
+#   the build's VERSION.
 # record: after a build, what the patched compare needs of it, from the files fex.zsh record
 #   wrote (<tree>.deps, <tree>.inputs and <tree>.compdb.json, from ninja's -t deps, -t inputs and
 #   -t compdb): each object the four files link, a copy of it, its compile command and its inputs
@@ -174,6 +182,17 @@ class MachO:
                        else {0: "self", 0xfe: "executable", 0xff: "flat"}.get(ordinal, f"ordinal {ordinal}"))
                 self.imports[n[1:]] = lib
 
+    def functions(self):
+        """{name: (address, size)} of the symbols in __TEXT,__text, each up to the next one"""
+        index = next((i + 1 for i, s in enumerate(self.sections) if s["name"] == "__TEXT,__text"), None)
+        if index is None:
+            return {}
+        text = self.sections[index - 1]
+        starts = sorted({(v, n) for n, t, sect, _, v in self.syms
+                         if not t & N_STAB and t & N_TYPE == N_SECT and sect == index})
+        ends = [v for v, _ in starts[1:]] + [text["addr"] + text["size"]]
+        return {n: (v, e - v) for (v, n), e in zip(starts, ends)}
+
     def bytes_of(self, addr, size):
         for s in self.sections:
             if s["addr"] <= addr and addr + size <= s["addr"] + s["size"] and s["offset"]:
@@ -259,7 +278,26 @@ def byte_gate(mine, theirs, r):
     return not differ
 
 
-def macho_checks(mine, theirs, r, baseline):
+def structural_gate(mine, theirs, r):
+    """the engine's file's shape, for a build with another compiler: the segments and sections by
+    name, order and kind, and the functions by name; which functions differ in their bytes is a
+    report. Returns that report's line for VERSION."""
+    shape = lambda m: ([(s["name"], s["maxprot"], s["initprot"]) for s in m.segments],
+                       [(s["name"], s["type"], s["flags"]) for s in m.sections])
+    r.check(shape(mine) == shape(theirs), f"the engine's {len(theirs.segments)} segments and {len(theirs.sections)} sections, "
+                                          f"by name, order and kind: {listing([s['name'] for s in theirs.sections], 20)}",
+            f"segments or sections differ: mine {shape(mine)}, the engine's {shape(theirs)}")
+    fm, ft = mine.functions(), theirs.functions()
+    r.check(set(fm) == set(ft), f"the engine's {len(ft)} functions by name",
+            f"functions differ by name: missing {listing(set(ft) - set(fm))}; extra {listing(set(fm) - set(ft))}")
+    code = lambda m, f: masked_words(m.bytes_of(*f))
+    differ = sorted(n for n in set(fm) & set(ft) if code(mine, fm[n]) != code(theirs, ft[n]))
+    print(f"- report, not the gate: with branch and address immediates masked, {len(differ)} of {len(ft)} functions "
+          f"differ in their bytes" + (f": {listing(differ, 100)}" if differ else ""))
+    return f"structural, {len(differ)} of {len(ft)} functions differ from the engine's file"
+
+
+def macho_checks(mine, theirs, r, baseline, gate="strict"):
     r.check(mine.filetype == theirs.filetype == 6, "a dylib, as the engine's", "not a dylib like the engine's")
     r.check(mine.install_name == theirs.install_name, f"install name `{mine.install_name}`",
             f"install name `{mine.install_name}`, the engine's is `{theirs.install_name}`")
@@ -277,11 +315,15 @@ def macho_checks(mine, theirs, r, baseline):
         diff = {f"{n} ({mine.imports.get(n)} / {theirs.imports.get(n)})"
                 for n in set(mine.imports) | set(theirs.imports) if mine.imports.get(n) != theirs.imports.get(n)}
         r.fail(f"imports differ (mine / the engine's): {listing(diff)}")
-    if baseline:
-        byte_gate(mine, theirs, r)
-        same = mine.data == theirs.data
-        print(f"- the whole file is {'' if same else 'not '}the engine's byte for byte"
-              + ("" if same else " (only the byte gate above decides)"))
+    if not baseline:
+        return None
+    if gate == "structural":
+        return structural_gate(mine, theirs, r)
+    held = byte_gate(mine, theirs, r)
+    same = mine.data == theirs.data
+    print(f"- the whole file is {'' if same else 'not '}the engine's byte for byte"
+          + ("" if same else " (only the byte gate above decides)"))
+    return "byte for byte" if held else "not byte for byte"
 
 
 # PE
@@ -525,7 +567,7 @@ def pe_checks(mine, theirs, r, baseline, unstripped=None):
     else:
         print(f"- build id {show(gm, am)} (the engine's {show(gt, at)}), SizeOfImage {mine.size_of_image:#x}")
     if not baseline:
-        return
+        return None
     times = lambda p: ", ".join(f"{struct.unpack_from('<I', p.data, o)[0]:#x}" for o in p.link_time_offsets())
     same = len(mine.data) == len(theirs.data) and mine.masked() == theirs.masked()
     r.check(same, f"every byte the engine's except the {len(theirs.link_time_offsets())} link times "
@@ -533,12 +575,13 @@ def pe_checks(mine, theirs, r, baseline, unstripped=None):
             f"not byte for byte the engine's, link times masked ({len(mine.data)} bytes, the engine's {len(theirs.data)})")
     if not same:
         diagnose_pe(mine, theirs, unstripped.function_names() if unstripped else {})
+    return "byte for byte but the link times" if same else "not byte for byte"
 
 
 # baseline and patched
 
-def file_report(rel, mine_dir, engine_dir, baseline):
-    """one file's checks, printed; returns whether all passed"""
+def file_report(rel, mine_dir, engine_dir, baseline, gate="strict"):
+    """one file's checks, printed; returns whether all passed, and which gate held"""
     r = Report()
     mine_path, theirs_path = os.path.join(mine_dir, rel), os.path.join(engine_dir, rel)
     name = os.path.basename(rel)
@@ -552,10 +595,10 @@ def file_report(rel, mine_dir, engine_dir, baseline):
                 f"the engine's {os.path.basename(alias)} isn't the same file as its {name}")
     if rel.endswith(".dll"):
         unstripped = os.path.join(mine_dir, "unstripped", name)
-        pe_checks(PE(mine_path), PE(theirs_path), r, baseline, PE(unstripped) if os.path.exists(unstripped) else None)
+        held = pe_checks(PE(mine_path), PE(theirs_path), r, baseline, PE(unstripped) if os.path.exists(unstripped) else None)
     else:
-        macho_checks(MachO(mine_path), MachO(theirs_path), r, baseline)
-    return r.failed == 0
+        held = macho_checks(MachO(mine_path), MachO(theirs_path), r, baseline, gate)
+    return r.failed == 0, held
 
 
 def norm(path, tree_dir, src, build):
@@ -677,8 +720,16 @@ def print_objects(bad, touched, new, removed, untouched):
         print(f"- {title} objects: {len(items)}" + (f": {listing(items, 1000)}" if items else ""))
 
 
-def run_files(mine, engine, baseline):
-    failed = [os.path.basename(rel) for rel in FILES if not file_report(rel, mine, engine, baseline)]
+def run_files(mine, engine, baseline, gate="strict"):
+    failed, held = [], []
+    for rel in FILES:
+        ok, h = file_report(rel, mine, engine, baseline, gate)
+        if not ok:
+            failed.append(os.path.basename(rel))
+        if h:
+            held.append(f"{os.path.basename(rel)} {h}")
+    if held:
+        print(f"\nbaseline: {', '.join(held)}")
     return failed
 
 
@@ -762,6 +813,39 @@ def selftest(engine):
         status.append("not byte for byte the engine's: __TEXT,__text" in out)
         print(f"{'ok' if status[-1] else 'FAIL'}: the byte gate names __TEXT,__text")
 
+        # the structural gate: a function's other bytes alone pass, with the report naming it;
+        # a missing export, another import, another minos or a missing function each fail
+        so = FILES[2]
+        run_s = lambda d: finish(run_files(d, engine, True, "structural"))
+        def symbol_name_offset(m, name):
+            symoff, _, stroff, _ = next(struct.unpack_from("<IIII", m.data, o + 8) for c, o, _ in m.commands if c == LC_SYMTAB)
+            i = next(i for i, sym in enumerate(m.syms) if sym[0] == name)
+            return stroff + struct.unpack_from("<I", m.data, symoff + 16 * i)[0]
+
+        out = run("the engine's files, structural", lambda: run_s(engine), 0, "")
+        status.append("libarm64ecfex.so structural, 0 of 12 functions differ" in out)
+        print(f"{'ok' if status[-1] else 'FAIL'}: the baseline line says 0 of 12 functions differ")
+
+        d = copy()
+        m = MachO(os.path.join(d, so))
+        f = m.functions()["__ZL24FEXUnixLib_GetPIDHandlerPv"]
+        o = m.sections[0]["offset"] + f[0] - m.sections[0]["addr"] + 3
+        patch(m.path, o, bytes([m.data[o] ^ 0x80]))
+        out = run("structural: other bytes in one function only", lambda: run_s(d), 0, "")
+        status.append("1 of 12 functions differ in their bytes: `__ZL24FEXUnixLib_GetPIDHandlerPv`" in out)
+        print(f"{'ok' if status[-1] else 'FAIL'}: the report names that function")
+
+        for label, change in (
+                ("a missing export", lambda m: (symbol_name_offset(m, "___wine_unix_call_funcs") + 3, b"X")),
+                ("another import", lambda m: (symbol_name_offset(m, "_getenv") + 1, b"X")),
+                ("another minos", lambda m: (next(o for c, o, _ in m.commands if c == LC_BUILD_VERSION) + 12,
+                                             struct.pack("<I", 0x1a0500))),
+                ("a missing function", lambda m: (symbol_name_offset(m, "__ZL25FEXUnixLib_MadviseHandlerPv") + 10, b"X"))):
+            d = copy()
+            m = MachO(os.path.join(d, so))
+            patch(m.path, *change(m))
+            run(f"structural: {label}", lambda: run_s(d), 1, "libarm64ecfex.so")
+
     # the object compare, on hand-made records
     obj = lambda sha, cmd, *inputs: {"sha256": sha, "command": cmd, "inputs": list(inputs)}
     base = {"generated": {"build:arm64ec/include/git_version.h": "a", "build:arm64ec/gen.inl": "g"},
@@ -803,9 +887,10 @@ def main():
         return info(a[1])
     if a[:1] == ["record"] and len(a) in (4, 5):
         return record(a[1], a[2], a[3], float(a[4]) if len(a) == 5 else None)
-    if a[:1] == ["baseline"] and len(a) == 3:
-        print("### FEX: my build of the engine's commit against the engine's files")
-        return finish(run_files(a[1], a[2], True))
+    if a[:1] == ["baseline"] and (len(a) == 3 or (len(a) == 4 and a[3] in ("strict", "structural"))):
+        gate = a[3] if len(a) == 4 else "strict"
+        print(f"### FEX: my build of the engine's commit against the engine's files ({gate} gate for the .so files)")
+        return finish(run_files(a[1], a[2], True, gate))
     if a[:1] == ["patched"] and len(a) >= 5:
         mine, engine, base_rec, head_rec = a[1:5]
         print("### FEX: this commit against the engine's files and my base build")
@@ -819,7 +904,7 @@ def main():
         if result[0]:
             failed.append("objects")
         return finish(failed)
-    print("usage: compare.py baseline <mine> <engine>\n"
+    print("usage: compare.py baseline <mine> <engine> [strict | structural]\n"
           "       compare.py record <record dir> <source dir> <build dir> [<since>]\n"
           "       compare.py patched <mine> <engine> <base record> <head record> [<changed path>...]\n"
           "       compare.py info <dll>\n"

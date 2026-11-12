@@ -57,9 +57,16 @@ compute. Mine builds the four files Mach9 ships (`libarm64ecfex.dll`, `libwow64f
 `libarm64ecfex.so`, `libwow64fex.so`) on GitHub's `macos-26` runner the way Mach9 built them, and
 checks them against the engine's files:
 
-- the engine's commit, rebuilt, has to match the engine's files byte for byte, the two DLLs
-  apart from their link times;
-- for a later commit, every object none of whose inputs changed has to be the base build's.
+- the engine's commit, rebuilt, has to match the engine's two DLLs byte for byte apart from
+  their link times (llvm-mingw builds them);
+- the two `.so` files are byte for byte the engine's only when the build runs on the engine's
+  runner and Xcode (`macos-26`, Xcode 26.6). Since 2026-11-12 it runs on GitHub's `xcode-27`
+  image, because `macos-26` runners weren't being assigned. Xcode 27's clang isn't the engine's,
+  so the `.so` files get a structural gate: the engine's exports, imports, libraries, `minos`,
+  segments, sections and functions by name. Which functions differ in their bytes is reported,
+  not failed. Going back is one edit, `RUNNER` and `XCODE_VERSION` at the top of the workflow;
+- for a later commit, every object none of whose inputs changed has to be the base build's, from
+  the same run and the same toolchain.
 
 The scripts it runs are in `.github/gw2/`. A push to `gw2-on-mac` publishes
 `fex-arm64-<commit>.tar.xz` to the pre-release `arm64-builds`.
