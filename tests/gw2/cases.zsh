@@ -93,3 +93,58 @@ stats counters mine 300 counters.exe "$counters" "$counted<1->"
 if [[ $which == mine ]]; then counters_check counters '<1->'; fi
 stats counters-l1-fixed mine 300 counters.exe "$counters" "${counted}0" FEX_DYNAMICL1CACHE=0
 if [[ $which == mine ]]; then counters_check counters-l1-fixed 0; fi
+
+# The first code buffer's size, FEX_INITIALCODEBUFFERMB (jdrly/gw2-on-mac#112). codebuf.exe
+# compiles more code than 16 MB holds and runs it twice, with a read of FEX's stats after each
+# pass; codebuf_check.py judges the two reads. Unset, pass 2 compiles at least 20% of it again.
+# At 128 one buffer holds both passes. An invalid value logs one error and acts as unset.
+# FEX_SILENTLOG=0 shows that 128 logs no error and 100 logs one (__wine_dbg_output doesn't go
+# through WINEDEBUG's channels). All of it runs under mine only: the engine's FEX doesn't know the
+# variable, and the cases read the stats slots, which only my FEX's layout is sure to match.
+codebuf() {
+  local label=$1 mode=$2 engines=$3
+  shift 3
+  applies $engines || return 0
+  stats $label $engines 600 codebuf.exe 'codebuf: passed' 'thread <->: *jit_count=<->*' "$@"
+  python3 -I "$here/codebuf_check.py" $mode "$prefix/$label.log" "$prefix/$label.reader.1" "$prefix/$label.reader.2" ||
+    failed+=1
+}
+codebuf codebuf-unset discard mine
+codebuf codebuf-128 keep mine FEX_INITIALCODEBUFFERMB=128 FEX_SILENTLOG=0
+codebuf codebuf-invalid invalid mine FEX_INITIALCODEBUFFERMB=100 FEX_SILENTLOG=0
+
+# Mach9's smoke test in both modes with the option at 16 and at 128
+for mb in 16 128; do
+  check smoke-default-$mb mine 40 fex.exe "$smoke" FEX_INITIALCODEBUFFERMB=$mb
+  check smoke-smcchecks-full-$mb mine 160 fex.exe "$smoke" FEX_SMCCHECKS=full FEX_INITIALCODEBUFFERMB=$mb
+done
+
+# The watchdog's samples (jdrly/gw2-on-mac#132). hang.exe prints one line and sleeps for good, so
+# run.zsh has to fail it at its 20-second limit and leave <label>.hang.<pid>.log for each Wine
+# process of the run. It passes only when hang.exe got to its sleep and the sample of hang.exe itself
+# (the case's program, or a command naming hang.exe) has frames: "(in <image>)" from sample,
+# "frame #" from lldb. The lines under it name each sample and which tool gave it.
+hang_check() {
+  local out f head rc=0 files tools=() program=no slept=no
+  integer stacks=0
+  out=$("$here/run.zsh" "$wine" "$prefix" hang 20 'gw2 test hang: never' "$tests/hang.exe" 2>&1) || rc=$?
+  [[ -f $prefix/hang.log ]] && tr -d '\r' <"$prefix/hang.log" | grep -xF 'gw2 test hang: sleeping' >/dev/null && slept=yes
+  files=($prefix/hang.hang.<->.log(Nn))
+  for f in $files; do
+    head=$(head -n 1 "$f")
+    tools+=(${${(M)${(f)"$(<$f)"}:#tool: *}#tool: })
+    print -r -- "      ${f:t}: $head"
+    if grep -qE '\(in [^)]+\)|frame #[0-9]' "$f"; then
+      stacks+=1
+      [[ $head == *"(the case's program)"* || ${(L)head} == *hang.exe* ]] && program=yes
+    fi
+  done
+  if (( rc == 1 )) && [[ $slept == yes && $program == yes && $out == *'(exit 137, the time limit)'* && $out == *'where it stood: '* ]]; then
+    print "ok    hang: hang.exe's own sample has a stack; ${#files} samples, $stacks with frames, from ${(j:; :)${(@u)tools}}"
+  else
+    print "FAIL  hang: exit $rc, slept $slept, hang.exe's sample with frames $program, ${#files} samples, $stacks with frames"
+    print -r -- "$out" | sed 's/^/      /'
+    failed+=1
+  fi
+}
+if [[ $which == mine ]]; then hang_check; fi

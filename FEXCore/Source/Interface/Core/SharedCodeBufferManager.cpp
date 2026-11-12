@@ -88,9 +88,26 @@ fextl::shared_ptr<CodeBuffer> SharedCodeBufferManager::AllocateNew(size_t Size) 
   return Buffer;
 }
 
+// The first buffer's size, from InitialCodeBufferMB (jdrly/gw2-on-mac#112). Each resize throws all
+// translated code away, so a larger start saves the discards below it. Read once per process, when
+// the first buffer is allocated.
+static size_t InitialCodeSize() {
+  FEX_CONFIG_OPT(InitialCodeBufferMB, INITIALCODEBUFFERMB);
+  const uint32_t MB = InitialCodeBufferMB;
+  switch (MB) {
+  case 16:
+  case 32:
+  case 64:
+  case 128: return size_t {MB} * 1024 * 1024;
+  default:
+    LogMan::Msg::EFmt("InitialCodeBufferMB is {}, not 16, 32, 64 or 128: the code buffer starts at 16 MB", MB);
+    return INITIAL_CODE_SIZE;
+  }
+}
+
 fextl::shared_ptr<CodeBuffer> SharedCodeBufferManager::GetLatest() {
   if (!Latest) {
-    AllocateNew(INITIAL_CODE_SIZE);
+    AllocateNew(InitialCodeSize());
   }
   return Latest;
 }
