@@ -1579,6 +1579,8 @@ NTSTATUS ThreadInit() {
     Threads.emplace(ThreadTID, Thread);
     if (StatAllocHandler) {
       Thread->ThreadStats = StatAllocHandler->AllocateSlot(ThreadTID);
+      // Module.S reads this copy, set before SuspendDoorbell below
+      Thread->CurrentFrame->ThreadStats = Thread->ThreadStats;
     }
   }
 

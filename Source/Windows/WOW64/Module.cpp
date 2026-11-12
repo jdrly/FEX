@@ -1059,6 +1059,7 @@ static void InitThreadLocked() {
   Threads.emplace(ThreadTID, Thread);
   if (StatAllocHandler) {
     Thread->ThreadStats = StatAllocHandler->AllocateSlot(ThreadTID);
+    Thread->CurrentFrame->ThreadStats = Thread->ThreadStats;
   }
 }
 

@@ -3,6 +3,7 @@
 #include <FEXCore/Core/CoreState.h>
 #include <FEXCore/Utils/EnumUtils.h>
 #include <FEXCore/Utils/LogManager.h>
+#include <FEXCore/Utils/SHMStats.h>
 
 #include <windef.h>
 #include <winternl.h>
@@ -33,6 +34,13 @@ namespace {
     ret
     )" ::[Trap] "S"(&HardwareTSOTrap)
         : "memory");
+  }
+
+  // FEX_PROFILESTATS: one more trap in the thread's slot, if it has one
+  void CountSwitch(FEXCore::Core::CpuStateFrame* Frame) {
+    if (Frame->ThreadStats) {
+      ++Frame->ThreadStats->AccumulatedHardwareTSOSwitchCount;
+    }
   }
 } // namespace
 
@@ -86,6 +94,7 @@ void EnsureOn(FEXCore::Core::CpuStateFrame* Frame) {
     HardwareTSOEnableFailed();
   }
   Frame->HardwareTSOState = FEXCore::ToUnderlying(State::On);
+  CountSwitch(Frame);
 }
 
 void EnsureOff(FEXCore::Core::CpuStateFrame* Frame) {
@@ -96,6 +105,7 @@ void EnsureOff(FEXCore::Core::CpuStateFrame* Frame) {
   // Off is stored before the trap, so the state never says On while the thread is off. If the trap fails, the thread
   // stays on with its state Off, which is harmless: the next entry into JIT code issues one redundant trap.
   Frame->HardwareTSOState = FEXCore::ToUnderlying(State::Off);
+  CountSwitch(Frame);
   CallTrap(0);
 }
 } // namespace FEX::Windows::HardwareTSO

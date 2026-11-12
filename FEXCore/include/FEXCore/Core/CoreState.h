@@ -13,6 +13,12 @@
 #include <string_view>
 #include <type_traits>
 
+#ifdef _WIN32
+namespace FEXCore::SHMStats {
+struct ThreadStats;
+}
+#endif
+
 namespace FEXCore::Core {
 // Wrapper around std::atomic using std::memory_order_relaxed.
 // This allows compilers to emit more performant code at the expense of visibly tearing.
@@ -477,6 +483,12 @@ struct CpuStateFrame {
   // Hardware TSO state of this thread, owned by the Windows frontend (see Source/Windows/Common/HardwareTSO.h).
   // The ARM64EC frontend reaches it from assembly through the pointer to SuspendDoorbell, so it must follow it.
   uint32_t HardwareTSOState {};
+
+  // GW2 on Mac (jdrly/gw2-on-mac#117): the thread's FEX_PROFILESTATS slot, or null. A copy of
+  // InternalThreadState::ThreadStats, set by the Windows frontends, for code that only has the frame: the ARM64EC
+  // assembly reaches it through the pointer to SuspendDoorbell, 8 bytes on. It sits in what was padding before
+  // Pointers, so no offset the JIT uses moves.
+  FEXCore::SHMStats::ThreadStats* ThreadStats {};
 #endif
 
   // Pointers that the JIT needs to load to remove relocations
@@ -486,6 +498,13 @@ static_assert(offsetof(CpuStateFrame, State) == 0, "CPUState must be first membe
 #ifdef _WIN32
 static_assert(offsetof(CpuStateFrame, HardwareTSOState) == offsetof(CpuStateFrame, SuspendDoorbell) + 4,
               "HardwareTSOState must directly follow SuspendDoorbell");
+static_assert(offsetof(CpuStateFrame, ThreadStats) == offsetof(CpuStateFrame, SuspendDoorbell) + 8,
+              "Module.S reads ThreadStats 8 bytes after SuspendDoorbell");
+// Without ThreadStats, Pointers would be at the next multiple of its alignment after HardwareTSOState, which is here.
+static_assert(alignof(JITPointers) > sizeof(void*) &&
+                offsetof(CpuStateFrame, ThreadStats) % alignof(JITPointers) == alignof(JITPointers) - sizeof(void*) &&
+                offsetof(CpuStateFrame, Pointers) == offsetof(CpuStateFrame, ThreadStats) + sizeof(void*),
+              "ThreadStats must fill padding, not move Pointers");
 #endif
 static_assert(offsetof(CpuStateFrame, Pointers) % 8 == 0, "JITPointers need to be aligned to 8 bytes");
 static_assert(offsetof(CpuStateFrame, Pointers) + sizeof(CpuStateFrame::Pointers) <= 32760, "JITPointers maximum pointer needs to be less "
