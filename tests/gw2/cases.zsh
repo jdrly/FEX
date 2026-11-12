@@ -16,7 +16,7 @@ check smoke-log both 40 fex.exe "$smoke" FEX_SILENTLOG=0 WINEDEBUG=
 report hardware-tso smoke-log '*FEX: Using hardware TSO*'
 
 # Which FEX ran: its version in the header of its stats object
-stats fex-version both 120 wait.exe 'gw2 test wait: passed' 'fex-<->-stats: *, FEX {version}'
+version fex-version both 120 wait.exe 'gw2 test wait: passed'
 
 # My FEX's counters (jdrly/gw2-on-mac#117), only under mine: the engine's FEX has no such fields,
 # and on macOS it gives no slot to a thread after its first page's worth. counters.exe
