@@ -28,6 +28,25 @@
 #   Artifact fex-arm64-<commit>: aarch64-windows/ and aarch64-unix/ as the engine has them,
 #   VERSION, LICENSE and NOTICES, kept 7 days. VERSION's line "switches: …" names every FEX_*
 #   option this commit adds to Config.json.in over the base.
+#   Then, in the same job (so it stays one macOS job at a time), the test stage on the engine:
+#   the release tarball unpacked twice, once as it is and once with my libarm64ecfex.dll (also as
+#   xtajit64.dll) and libarm64ecfex.so, and tests/gw2/engine.zsh runs every case of
+#   tests/gw2/cases.zsh under each, in a scratch prefix, without a window. Today: Mach9's
+#   smoke/fex.c (athei/mach9 at $MACH9_COMMIT, by its sha256) in FEX's default mode and with
+#   FEX_SMCCHECKS=full; the same with FEX's log on, which says whether hardware TSO works on this
+#   runner (the summary's Reports); and tests/gw2/native/fexstats, which reads the FEX version out
+#   of FEX_PROFILESTATS's stats object: $BASE_VERSION under the engine's files, this commit's under
+#   mine.
+#   To add a test: the program as tests/gw2/<name>.c (built for Win64 x86_64 as <name>.exe, with
+#   tests/gw2/gw2test.h when the reader has to look at it) and one line in tests/gw2/cases.zsh:
+#   check (a line it has to print), stats (the same, plus a pattern the reader's last read has to
+#   match) or report (a yes or no from a case's log). engine.zsh's header says how each works.
+# core: FEX's own tests on GitHub's arm64 Linux runner ($CORE_RUNNER), FEX built natively: the
+#   assembly tests (unittests/ASM, unittests/32Bit_ASM) with FEX_HOSTFEATURES=disablesve,disableafp,
+#   since that host has SVE and my Mac doesn't, and the instruction count tests
+#   (unittests/InstructionCountCI), with each listing whose numbers this commit's JIT changes. The
+#   failures are compared with tests/gw2/core-failures.txt, the engine's commit's: a test that
+#   isn't on that list may not fail; one on it that passes now is reported.
 # Since 2026-11-12 it runs on GitHub's Xcode 27 image: macos-26 runners weren't being assigned, and I
 # have no Mac of my own for it. Xcode 27's clang isn't the engine's, so the .so files get the
 # structural gate. Going back is one edit: RUNNER and XCODE_VERSION below to the engine's values.
@@ -74,6 +93,10 @@ env:
   LLVM_MINGW_SHA256: 66cbd5178c4a71b0d473e68ede172f8eb7d15d023e67f39201d0a69e21f6bf3c
   MACH9_VERSION: v0.3.1
   MACH9_SHA256: 90aff9a897ed0ff9aac44d0e06f0aecd3ee985afb38037f3f915451e51fa974e
+  # athei/mach9's v0.3.1, and its smoke/fex.c there, for the test stage
+  MACH9_COMMIT: 39f186e88de52e1960341d9939e5bf5ebb2a889d
+  FEX_SMOKE_SHA256: 27a145e176307c8f26101d1089135c7ca9bb04107bd273de37de16e02ca9d99a
+  CORE_RUNNER: &core_runner ubuntu-24.04-arm
 
 defaults:
   run:
@@ -373,6 +396,61 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+      # The test stage's programs: Mach9's smoke/fex.c and each tests/gw2/*.c for Win64 x86_64 with
+      # llvm-mingw, and fexstats natively against this commit's FEX headers
+      - name: The test stage's programs
+        id: programs
+        if: ${{ !cancelled() && steps.stage.outcome == 'success' }}
+        run: |
+          t=$RUNNER_TEMP/tests
+          mkdir -p "$t"
+          curl -fsSL --retry 3 -o "$t/fex.c" "https://raw.githubusercontent.com/athei/mach9/$MACH9_COMMIT/smoke/fex.c"
+          echo "$FEX_SMOKE_SHA256  $t/fex.c" | shasum -a 256 -c
+          # as Mach9's check_fex_runs builds it
+          "$MINGW_DIR/bin/x86_64-w64-mingw32-clang" -O2 -o "$t/fex.exe" "$t/fex.c"
+          for c in "$SRC"/tests/gw2/*.c; do
+            "$MINGW_DIR/bin/x86_64-w64-mingw32-clang" -O2 -Wall -Werror -o "$t/$(basename "$c" .c).exe" "$c"
+          done
+          # FEX's arm64 path in SHMStats.h; CMake sets ARCHITECTURE_arm64 for FEX's own builds
+          /usr/bin/clang++ -std=c++20 -O2 -Wall -Werror -DARCHITECTURE_arm64 -o "$t/fexstats" "$SRC/tests/gw2/native/fexstats.cpp" \
+            -I"$SRC/FEXCore/include" -I"$SRC/Source"
+          ls -l "$t"
+      # Two copies of the engine: its own, and one with my ARM64EC FEX (the app installs that half
+      # only; the WoW64 half stays the engine's). APFS clones, so the copy is free.
+      - name: The engine, and a copy with my FEX
+        id: engines
+        if: ${{ !cancelled() && steps.programs.outcome == 'success' }}
+        run: |
+          e=$RUNNER_TEMP/engine-own m=$RUNNER_TEMP/engine-mine
+          mkdir -p "$e"
+          tar -xf toolchains/mach9.tar.xz -C "$e"
+          cp -Rc "$e" "$m"
+          w=$m/wine/lib/wine
+          install -m 755 dist/fex/aarch64-windows/libarm64ecfex.dll "$w/aarch64-windows/libarm64ecfex.dll"
+          install -m 755 dist/fex/aarch64-windows/libarm64ecfex.dll "$w/aarch64-windows/xtajit64.dll"
+          install -m 755 dist/fex/aarch64-unix/libarm64ecfex.so "$w/aarch64-unix/libarm64ecfex.so"
+          xattr -drs com.apple.quarantine "$e" "$m"
+          for d in "$e" "$m"; do
+            shasum -a 256 "$d"/wine/lib/wine/aarch64-windows/{libarm64ecfex,xtajit64}.dll "$d"/wine/lib/wine/aarch64-unix/libarm64ecfex.so
+          done
+          "$m/wine/bin/wine" --version
+      - name: Tests on the engine
+        id: engine-tests
+        if: ${{ !cancelled() && steps.engines.outcome == 'success' }}
+        run: |
+          mine=$(LC_ALL=C grep -aoE 'FEX-[0-9]+(\.[0-9]+)?-[0-9]+-g[0-9a-f]{7,}' dist/fex/aarch64-windows/libarm64ecfex.dll | sort -u)
+          status=0
+          "$SRC/tests/gw2/engine.zsh" "$RUNNER_TEMP/engine-own/wine" "$RUNNER_TEMP/engine-mine/wine" "$RUNNER_TEMP/tests" \
+            "$RUNNER_TEMP/engine-tests" "$BASE_VERSION" "$mine" >"$RUNNER_TEMP/engine-tests.md" || status=1
+          tee -a "$GITHUB_STEP_SUMMARY" <"$RUNNER_TEMP/engine-tests.md"
+          exit "$status"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() && steps.engines.outcome == 'success' }}
+        with:
+          name: engine-tests-${{ env.COMMIT }}
+          path: ${{ runner.temp }}/engine-tests
+          retention-days: 7
+
       # callret_sp moved one slot (swapped with _pad1, so FEX's own asserts hold): GW2Contract.h has
       # to stop Module.cpp's compile and name the constant in jdrly/wine that has to follow. Last,
       # since it leaves CoreState.h newer than every object.
@@ -394,6 +472,104 @@ jobs:
         with:
           key: fex-arm64-ccache-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.CCACHE_DIR }}
+
+  core:
+    name: FEX's own tests (arm64 Linux)
+    runs-on: *core_runner
+    timeout-minutes: 150
+    env:
+      CC: clang
+      CXX: clang++
+      CCACHE_DIR: /home/runner/fex-core-ccache
+      CCACHE_MAXSIZE: 2G
+      FEX_DISABLETELEMETRY: 1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.COMMIT }}
+          persist-credentials: false
+      - name: Submodules, and the tools
+        run: |
+          git submodule update --init --depth 1
+          sudo apt-get update -q
+          sudo apt-get install -y -q clang ninja-build nasm ccache
+          {
+            echo "### Core tests' toolchain ($CORE_RUNNER)"
+            echo '```'
+            echo "$ImageOS $ImageVersion, $(nproc) CPUs: $(grep -m1 -oE 'Features.*' /proc/cpuinfo)"
+            clang --version | sed -n 1p
+            cmake --version | sed -n 1p
+            echo "ninja $(ninja --version), $(nasm -v)"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Restore ccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: fex-core-ccache-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: fex-core-ccache-
+          path: ${{ env.CCACHE_DIR }}
+      # what FEX's own CI configures for these tests (ccpp.yml, instcountci.yml at the base), without
+      # the thunks, FEXConfig and the Linux tests, which none of them uses
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=False -DENABLE_ASSERTIONS=True \
+            -DENABLE_VIXL_DISASSEMBLER=True -DBUILD_TESTING=True -DBUILD_THUNKS=False -DBUILD_FEXCONFIG=False
+          cmake --build build --target TestHarnessRunner CodeSizeValidation asm_files 32bit_asm_files instcountci_test_files
+          ccache --show-stats
+      - name: Save ccache
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: fex-core-ccache-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.CCACHE_DIR }}
+      # Each suite's failures as "<suite> <test>", from ctest's LastTestsFailed.log. The instruction
+      # count tests write each listing's new numbers into the tree (FEX's instcountci_update_tests),
+      # and a listing git then sees changed is one this commit's JIT generates other code for.
+      - name: Run them
+        run: |
+          out=$RUNNER_TEMP/core
+          mkdir -p "$out"
+          failed() { sed -n 's/^[0-9]*:/'"$1"' /p' build/Testing/Temporary/LastTestsFailed.log 2>/dev/null || true; }
+          (cd build && FEX_HOSTFEATURES=disablesve,disableafp ctest --timeout 302 -j"$(nproc)" -R '\.asm$' >"$out/asm.log" 2>&1) || true
+          failed asm >"$out/failures"
+          rm -f build/Testing/Temporary/LastTestsFailed.log
+          (cd build && ctest --timeout 302 -j"$(nproc)" -R 'InstCountCI/.*\.instcountci$' >"$out/instcountci.log" 2>&1) || true
+          failed instcountci >>"$out/failures"
+          (cd build && ctest --timeout 302 -j"$(nproc)" -R 'InstCountCI/.*new_numbers$' >"$out/instcountci-update.log" 2>&1) || true
+          git diff --name-only -- unittests/InstructionCountCI | sed 's/^/instcountci-numbers /' >>"$out/failures"
+          LC_ALL=C sort -o "$out/failures" "$out/failures"
+          for f in asm instcountci; do grep -hE 'tests passed, [0-9]+ tests? failed out of' "$out/$f.log" || echo "$f: no ctest total"; done | tee "$out/totals"
+      - name: Against the reference list
+        run: |
+          out=$RUNNER_TEMP/core ref=tests/gw2/core-failures.txt
+          {
+            echo "### FEX's own tests"
+            echo
+            sed 's/^/- /' "$out/totals"
+            echo "- failures: $(grep -c . "$out/failures" || true)"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          if [[ ! -f $ref ]]; then
+            { echo; echo "No $ref yet. This run's list, the artifact core-failures-$COMMIT:"; echo '```'; cat "$out/failures"; echo '```'; } |
+              tee -a "$GITHUB_STEP_SUMMARY"
+            echo "::error::no reference list $ref yet"
+            exit 1
+          fi
+          new=$(LC_ALL=C comm -23 "$out/failures" "$ref")
+          fixed=$(LC_ALL=C comm -13 "$out/failures" "$ref")
+          {
+            if [[ -z $new && -z $fixed ]]; then
+              echo "- the same $(grep -c . "$ref" || true) failures as $ref"
+            fi
+            [[ -z $fixed ]] || { echo "- on the reference list and passing now:"; echo '```'; echo "$fixed"; echo '```'; }
+            [[ -z $new ]] || { echo "- **failing and not on the reference list:**"; echo '```'; echo "$new"; echo '```'; }
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          [[ -z $new ]]
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: core-failures-${{ env.COMMIT }}
+          path: ${{ runner.temp }}/core
+          retention-days: 7
 
   lint:
     name: Lint
@@ -419,7 +595,7 @@ jobs:
 
   publish:
     name: Publish
-    needs: [build, lint]
+    needs: [build, core, lint]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

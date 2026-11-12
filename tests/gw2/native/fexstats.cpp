@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 /*
  * gw2 (jdrly/gw2-on-mac#109): what FEX's stats object says about a Wine process. Built natively
- * with Apple's clang against this tree's FEX headers, so the layout is FEX's own
- * (FEXCore/include/FEXCore/Utils/SHMStats.h, held to my Wine fork's sampler by
- * Source/Windows/Common/GW2Contract.h). It never runs Wine itself.
+ * with Apple's clang (-DARCHITECTURE_arm64) against this tree's FEX headers through
+ * Source/Windows/Common/GW2ContractStats.h, so the layout is FEX's own
+ * (FEXCore/include/FEXCore/Utils/SHMStats.h) and the one my Wine fork's sampler reads. That part of
+ * the contract is on its own because FEX's other headers don't build for macOS. It never runs
+ * Wine itself.
  *
  *   fexstats <pid>...
  *
@@ -24,9 +26,9 @@
  * headers describe; the header line is printed, the slots aren't.
  *
  * A change to ThreadStats adds its field to FEX_STATS_FIELDS and raises STATS_VERSION in FEX;
- * GW2Contract.h and my Wine fork's heatprof.h follow.
+ * GW2ContractStats.h and my Wine fork's heatprof.h follow.
  */
-#include "Windows/Common/GW2Contract.h"
+#include "Windows/Common/GW2ContractStats.h"
 
 #include <cstdint>
 #include <cstdio>
