@@ -30,7 +30,7 @@
  * the test stage asks which FEX ran, the engine's included, after my stats layout has moved on.
  *
  * A change to ThreadStats adds its field to FEX_STATS_FIELDS and raises STATS_VERSION in FEX;
- * GW2ContractStats.h and my Wine fork's heatprof.h follow.
+ * GW2ContractStats.h and my Wine fork's heatfex.h follow.
  */
 #include "Windows/Common/GW2ContractStats.h"
 
@@ -43,19 +43,23 @@
 #include <unistd.h>
 
 // <name> <ThreadStats member>, in the order the line prints them
-#define FEX_STATS_FIELDS(X)                                  \
-  X(jit_time, AccumulatedJITTime)                            \
-  X(signal_time, AccumulatedSignalTime)                      \
-  X(sigbus, AccumulatedSIGBUSCount)                          \
-  X(smc, AccumulatedSMCCount)                                \
-  X(float_fallback, AccumulatedFloatFallbackCount)           \
-  X(cache_miss, AccumulatedCacheMissCount)                   \
-  X(cache_read_lock_time, AccumulatedCacheReadLockTime)      \
-  X(cache_write_lock_time, AccumulatedCacheWriteLockTime)    \
-  X(jit_count, AccumulatedJITCount)                          \
-  X(disk_cache_hit, AccumulatedDiskCacheHitCount)            \
-  X(disk_cache_miss, AccumulatedDiskCacheMissCount)          \
-  X(disk_cache_lookup_time, AccumulatedDiskCacheLookupTime)
+#define FEX_STATS_FIELDS(X)                                 \
+  X(jit_time, AccumulatedJITTime)                           \
+  X(signal_time, AccumulatedSignalTime)                     \
+  X(sigbus, AccumulatedSIGBUSCount)                         \
+  X(smc, AccumulatedSMCCount)                               \
+  X(float_fallback, AccumulatedFloatFallbackCount)          \
+  X(cache_miss, AccumulatedCacheMissCount)                  \
+  X(cache_read_lock_time, AccumulatedCacheReadLockTime)     \
+  X(cache_write_lock_time, AccumulatedCacheWriteLockTime)   \
+  X(jit_count, AccumulatedJITCount)                         \
+  X(disk_cache_hit, AccumulatedDiskCacheHitCount)           \
+  X(disk_cache_miss, AccumulatedDiskCacheMissCount)         \
+  X(disk_cache_lookup_time, AccumulatedDiskCacheLookupTime) \
+  X(tso_switches, AccumulatedHardwareTSOSwitchCount)        \
+  X(native_exits, AccumulatedNativeExitCount)               \
+  X(code_buffer_moves, AccumulatedCodeBufferMoveCount)      \
+  X(l1_resizes, AccumulatedL1ResizeCount)
 
 using Header = GW2Contract::ThreadStatsHeader;
 using Slot = GW2Contract::ThreadStats;

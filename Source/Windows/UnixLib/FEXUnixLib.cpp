@@ -160,9 +160,18 @@ static inline void* InitializeSHM(uint32_t MapSize, uint32_t MaxSize, uint64_t M
     return nullptr;
   }
 
+#ifdef __APPLE__
+  // macOS sets the size of a shared memory object only once, so it gets the whole reservation now and AllocateMoreSlots
+  // only maps more of it. Its pages take memory only once touched, and the header's Size still says how much is in use.
+  // GW2 on Mac (jdrly/gw2-on-mac#117): before, every thread after the first page's worth had no slot.
+  if (ftruncate(fd, MaxSize) == -1) {
+    goto err;
+  }
+#else
   if (ftruncate(fd, MapSize) == -1) {
     goto err;
   }
+#endif
 
   // Reserve a region of MAX_STATS_SIZE so we can grow the allocation buffer.
   // Number of thread slots when ThreadStatsHeader == 64bytes and ThreadStats == 40bytes:
@@ -212,9 +221,12 @@ static inline bool AllocateMoreSlots(void* SHMBase, uint32_t NewSize) {
     return false;
   }
 
+#ifndef __APPLE__
+  // On macOS the object already has its full size (InitializeSHM)
   if (ftruncate(fd, NewSize) == -1) {
     goto err;
   }
+#endif
 
   {
     auto SharedBase = mmap(SHMBase, NewSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, 0);

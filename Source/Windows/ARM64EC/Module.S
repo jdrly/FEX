@@ -6,6 +6,13 @@
   // NotUsed (2). The Mach trap thread_set_x86_64_compat(Enable), whose number is in HardwareTSOTrap, is issued with
   // svc #0x80 and returns 0 in x0 on success. It was seen to keep every other register, but being undocumented, the
   // registers that hold x64 state, x30 and NZCV are saved around it anyway.
+  //
+  // With FEX_PROFILESTATS, CpuStateFrame::ThreadStats, 8 bytes after the suspend doorbell, points to the thread's stats
+  // slot (FEXCore/include/FEXCore/Utils/SHMStats.h); it is null without one. Each trap counts in its
+  // AccumulatedHardwareTSOSwitchCount (0x70), each exit from JIT code into native code in AccumulatedNativeExitCount
+  // (0x78, ExitFunctionECCounted). Only the thread writes its slot, so a plain increment is enough. The doorbell is the
+  // frame's whenever JIT code runs, and the trap paths below run only for a thread that is On, which the doorbells used
+  // before ThreadInit and in ThreadTerm never are. There the check costs a load and a branch next to a trap.
 
   // Saves x0-x12, x15, x30 and NZCV below a 16-byte aligned stack pointer, as the x64 stack may be only 8-byte aligned.
   // x13 and x14 are not part of the ARM64EC register state.
@@ -93,6 +100,12 @@ enter_jit_tso_on:
   ldr x16, [x17, #0x20] // ChpeV2CpuAreaInfo->SuspendDoorbell
   mov w0, #1
   str w0, [x16, #0x4] // CpuStateFrame::HardwareTSOState = On
+  ldr x0, [x16, #0x8] // CpuStateFrame::ThreadStats
+  cbz x0, 1f
+  ldr x1, [x0, #0x70] // ThreadStats::AccumulatedHardwareTSOSwitchCount
+  add x1, x1, #1
+  str x1, [x0, #0x70]
+1:
   TSO_RESTORE_X64_STATE
   b enter_jit_dispatch
 
@@ -198,6 +211,12 @@ ExitFunctionSuspendPoint:
   stp x8, x9, [sp, #0x50]
   mrs x0, nzcv
   str x0, [sp, #0x60]
+  ldr x17, [x16, #0x8] // CpuStateFrame::ThreadStats
+  cbz x17, 3f
+  ldr x0, [x17, #0x70] // ThreadStats::AccumulatedHardwareTSOSwitchCount
+  add x0, x0, #1
+  str x0, [x17, #0x70]
+3:
   mov w0, #0
   adrp x16, HardwareTSOTrap
   ldr x16, [x16, #:lo12:HardwareTSOTrap]
@@ -291,3 +310,17 @@ end:
 "#JumpSetStack":
   mov sp, x1
   br x0
+
+  // ExitFunctionEC for a thread with a stats slot: ThreadInit points CpuStateFrame::Pointers.ExitFunctionEC, through
+  // which the JIT exits, here instead, so ExitFunctionEC itself is unchanged and a thread without a slot pays nothing.
+  // Like ExitFunctionEC's first instructions it runs with InSimulation set and keeps NZCV and FPCR. x16, x17 and x23
+  // are free: ExitFunctionEC overwrites them before reading them.
+.global ExitFunctionECCounted
+ExitFunctionECCounted:
+  ldr x17, [x18, #0x1788] // TEB->ChpeV2CpuAreaInfo
+  ldr x17, [x17, #0x20] // ChpeV2CpuAreaInfo->SuspendDoorbell
+  ldr x16, [x17, #0x8] // CpuStateFrame::ThreadStats
+  ldr x23, [x16, #0x78] // ThreadStats::AccumulatedNativeExitCount
+  add x23, x23, #1
+  str x23, [x16, #0x78]
+  b ExitFunctionEC

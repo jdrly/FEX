@@ -260,6 +260,7 @@ public:
 
           // If L1 was just shrunk, then we just removed our cached entry. Add it back.
           AddL1Entry(GuestAddress, HostCode);
+          FEXCORE_PROFILE_INSTANT_INCREMENT(Thread, AccumulatedL1ResizeCount, 1);
         }
       } else if (AveragePerSecond < DynamicL1CacheDecreaseCountHeuristic()) {
         if (CurrentL1Entries > MIN_L1_ENTRIES) {
@@ -274,6 +275,7 @@ public:
           // Update the thread's L1 pointer mask to increase how much cache it uses.
           // Since we're in C-code, this is safe to update here.
           Thread->CurrentFrame->State.L1Mask = GetScaledL1PointerMask();
+          FEXCORE_PROFILE_INSTANT_INCREMENT(Thread, AccumulatedL1ResizeCount, 1);
         }
       }
 
