@@ -1,21 +1,25 @@
-/* gw2 (jdrly/gw2-on-mac#117): moves each of the counters my FEX adds to its stats slots, for a
- * reader of FEX's stats (tests/gw2/gw2test.h), and keeps 200 threads alive while it is read.
+/* gw2 (jdrly/gw2-on-mac#117): moves each of the counters my FEX adds to its stats slots, in
+ * phases a reader of FEX's stats can tell apart (tests/gw2/gw2test.h), and keeps 200 threads alive
+ * while it is read.
  *
  * Win64 x86_64, built with llvm-mingw. In order:
- *   - starts 200 threads that wait until the read is done; each one needs a stats slot;
- *   - makes 100,000 calls into native code (GetTickCount, an ARM64EC export of kernel32), each an
- *     exit from JIT code, and 1,000 Sleep(0), each a system call, so two hardware TSO switches
- *     where FEX switches them per thread;
+ *   - starts 200 threads that wait until the program ends; each one needs a stats slot.
+ *     Read 1.
+ *   - makes 100,000 calls into native code (GetTickCount, an ARM64EC export of kernel32 that makes
+ *     no system call), each an exit from JIT code, and 1,000 Sleep(0), each an exit and a system
+ *     call, so two hardware TSO switches where FEX switches them per thread. Read 2.
  *   - writes FUNCTIONS functions, each `mov eax, imm32; ret` on its own 16 bytes, into one
  *     executable allocation, all before the first call, as tests/gw2/codebuf.c does (#112), and
  *     calls them through a pointer: one compile each, more host code than the 16 MB code buffer
- *     FEX starts with, so the thread moves to a new one;
- *   - calls them again for at least 3 seconds. Each indirect call looks its target up in the
- *     thread's L1 cache; with far more targets than its 8,192 entries, most miss it and are found
- *     in L2 or L3. Over 250 such hits a second for a second make the dynamic L1 double.
+ *     FEX starts with, so the thread moves to a new one. Then it calls them again for at least 3
+ *     seconds. Each indirect call looks its target up in the thread's L1 cache; with far more
+ *     targets than its 8,192 entries, most miss it and are found in L2 or L3, and over 250 such
+ *     hits a second for a second make the dynamic L1 double. Read 3.
  *
- * It prints "gw2 test counters: tid <main thread id>", then "gw2 test ready" for the one read,
- * then "gw2 test counters: passed". The exit status is 0 with "passed", 1 otherwise. */
+ * Only the main thread does any of it. It prints
+ *   gw2 test counters: tid <main thread id>
+ *   gw2 test counters: workers <thread id>...    the 200 others
+ * and "gw2 test counters: passed" at the end. The exit status is 0 with "passed", 1 otherwise. */
 #include <stdint.h>
 #include <string.h>
 
@@ -29,10 +33,11 @@ typedef uint32_t (*function)(void);
 
 static HANDLE done;
 static volatile LONG started;
+static DWORD workers[THREADS];
 
 static DWORD WINAPI wait_for_done(void *arg)
 {
-    (void)arg;
+    workers[(intptr_t)arg] = GetCurrentThreadId();
     InterlockedIncrement(&started);
     WaitForSingleObject(done, INFINITE);
     return 0;
@@ -56,7 +61,7 @@ int main(void)
 {
     uint8_t *code;
     uint64_t first, start;
-    int i, passes = 0, ok;
+    int i, passes = 0, ok = 1;
 
     if (!(done = CreateEventA(NULL, TRUE, FALSE, NULL)))
     {
@@ -65,7 +70,8 @@ int main(void)
     }
     for (i = 0; i < THREADS; i++)
     {
-        HANDLE thread = CreateThread(NULL, 65536, wait_for_done, NULL, STACK_SIZE_PARAM_IS_A_RESERVATION, NULL);
+        HANDLE thread = CreateThread(NULL, 65536, wait_for_done, (void *)(intptr_t)i, STACK_SIZE_PARAM_IS_A_RESERVATION,
+                                     NULL);
         if (!thread)
         {
             printf("gw2 test counters: thread %d failed, error %lu\n", i, GetLastError());
@@ -75,12 +81,20 @@ int main(void)
     }
     while (started < THREADS)
         Sleep(10);
-    printf("gw2 test counters: tid %lu threads %d\n", GetCurrentThreadId(), THREADS);
+    printf("gw2 test counters: tid %lu\n", GetCurrentThreadId());
+    printf("gw2 test counters: workers");
+    for (i = 0; i < THREADS; i++)
+        printf(" %lu", workers[i]);
+    printf("\n");
+    if (gw2_test_wait_for_reader())
+        return 1;
 
     for (i = 0; i < 100000; i++)
         GetTickCount();
     for (i = 0; i < 1000; i++)
         Sleep(0);
+    if (gw2_test_wait_for_reader())
+        return 1;
 
     code = VirtualAlloc(NULL, (size_t)FUNCTIONS * STRIDE, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
     if (!code)
@@ -98,9 +112,7 @@ int main(void)
         p[5] = 0xc3; /* ret */
     }
     FlushInstructionCache(GetCurrentProcess(), code, (size_t)FUNCTIONS * STRIDE);
-
     first = pass(code);
-    ok = 1;
     start = GetTickCount64();
     do
     {
@@ -108,8 +120,8 @@ int main(void)
         passes++;
     } while (GetTickCount64() - start < 3000);
     printf("gw2 test counters: %d passes after the first, %s\n", passes, ok ? "same sums" : "different sums");
-
     ok &= !gw2_test_wait_for_reader();
+
     /* the threads end with the process */
     SetEvent(done);
     if (!ok)

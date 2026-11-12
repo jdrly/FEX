@@ -75,6 +75,7 @@ extern "C" {
 extern IMAGE_DOS_HEADER __ImageBase; // Provided by the linker
 
 extern void* ExitFunctionEC;
+extern void* ExitFunctionECCounted;
 extern void* CheckCall;
 extern void* ExitFunctionSuspendPoint;
 extern void* ExitFunctionSuspendResumePoint;
@@ -1581,6 +1582,10 @@ NTSTATUS ThreadInit() {
       Thread->ThreadStats = StatAllocHandler->AllocateSlot(ThreadTID);
       // Module.S reads this copy, set before SuspendDoorbell below
       Thread->CurrentFrame->ThreadStats = Thread->ThreadStats;
+      if (Thread->ThreadStats) {
+        // Counts this thread's exits into native code; other threads keep the plain ExitFunctionEC
+        Thread->CurrentFrame->Pointers.ExitFunctionEC = reinterpret_cast<uintptr_t>(&ExitFunctionECCounted);
+      }
     }
   }
 
@@ -1652,7 +1657,12 @@ NTSTATUS ThreadTerm(HANDLE Thread, LONG ExitCode) {
 
     Threads.erase(it);
     if (StatAllocHandler) {
-      StatAllocHandler->DeallocateSlot(CPUArea.ThreadState()->ThreadStats);
+      auto* const Stopping = CPUArea.ThreadState();
+      StatAllocHandler->DeallocateSlot(Stopping->ThreadStats);
+      // The slot can go to a new thread from here on, so nothing of this one may count in it any more
+      Stopping->ThreadStats = nullptr;
+      Stopping->CurrentFrame->ThreadStats = nullptr;
+      Stopping->CurrentFrame->Pointers.ExitFunctionEC = reinterpret_cast<uintptr_t>(&ExitFunctionEC);
     }
 
     // Terminated in the middle of an untracked read, see BTCpu64NotifyReadFile

@@ -1186,6 +1186,9 @@ void BTCpuThreadTerm(HANDLE Thread, LONG ExitCode) {
     Threads.erase(it);
     if (StatAllocHandler) {
       StatAllocHandler->DeallocateSlot(TLS.ThreadState()->ThreadStats);
+      // The slot can go to a new thread from here on
+      TLS.ThreadState()->ThreadStats = nullptr;
+      TLS.ThreadState()->CurrentFrame->ThreadStats = nullptr;
     }
     auto ThreadState = TLS.ThreadState();
 
