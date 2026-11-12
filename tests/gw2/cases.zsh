@@ -113,6 +113,32 @@ codebuf codebuf-unset discard mine
 codebuf codebuf-128 keep mine FEX_INITIALCODEBUFFERMB=128 FEX_SILENTLOG=0
 codebuf codebuf-invalid invalid mine FEX_INITIALCODEBUFFERMB=100 FEX_SILENTLOG=0
 
+# The stats object grows while threads count in their slots (jdrly/gw2-on-mac#139). slots.exe
+# (tests/gw2/slots.c) keeps 8 threads counting in their slots while it starts 600 more, so the
+# object grows five times under them. On macOS my FEX maps the whole object once and a growth maps
+# nothing; before, each growth mapped it again over the live slots. Three runs, as a fault there
+# is a race. Each run has to pass, give every one of the 608 threads a slot, and show native exits
+# in each counting thread's. Under mine only, like the counters cases.
+slots_check() {
+  local label=$1 tid r log=()
+  integer missing=0 quiet=0
+  [[ -f $prefix/$label.log ]] && log=(${(f)"$(tr -d '\r' <"$prefix/$label.log")"})
+  local counting=(${=${(M)log:#gw2 test slots: counting *}#gw2 test slots: counting})
+  local waiting=(${=${(M)log:#gw2 test slots: waiting *}#gw2 test slots: waiting})
+  for tid in $counting $waiting; do
+    (( $(counter "$label.reader.1" "$tid" tso_switches) >= 0 )) || missing+=1
+  done
+  for tid in $counting; do
+    (( $(counter "$label.reader.1" "$tid" native_exits) > 0 )) || quiet+=1
+  done
+  (( ${#counting} == 8 && ${#waiting} == 600 && missing == 0 && quiet == 0 )) && r=ok || r=no
+  verdict $label-slots $r "${#counting} counting and ${#waiting} waiting threads named, $missing without a slot, $quiet counting threads with no exits counted"
+}
+for n in 1 2 3; do
+  stats slots-$n mine 120 slots.exe 'gw2 test slots: passed' 'thread <->: *'
+  if [[ $which == mine ]]; then slots_check slots-$n; fi
+done
+
 # Mach9's smoke test in both modes with the option at 16 and at 128
 for mb in 16 128; do
   check smoke-default-$mb mine 40 fex.exe "$smoke" FEX_INITIALCODEBUFFERMB=$mb
