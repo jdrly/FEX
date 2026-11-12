@@ -85,7 +85,8 @@ struct ThreadStats {
   // Moves of the thread to a newer code buffer: one it starts itself when its buffer is full, or one another thread
   // started.
   uint64_t AccumulatedCodeBufferMoveCount;
-  // Doublings and halvings of the thread's dynamic L1 lookup cache.
+  // Doublings and halvings of the thread's dynamic L1 lookup cache. The L1 resizes only by the lookups that miss both
+  // L1 and L2, so a program whose code fits in L2 (2,047 pages of x86 code a thread) shows none.
   uint64_t AccumulatedL1ResizeCount;
 };
 
