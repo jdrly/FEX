@@ -1711,3 +1711,6 @@ BOOLEAN BTCpu64IsProcessorFeaturePresent(UINT Feature) {
 void UpdateProcessorInformation(SYSTEM_CPU_INFORMATION* Info) {
   CPUFeatures->UpdateInformation(Info);
 }
+
+// Last, so that no line above moves: the offsets my Wine fork's sampler reads (static_asserts only)
+#include "Windows/Common/GW2Contract.h"
