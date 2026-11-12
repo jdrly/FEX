@@ -157,7 +157,7 @@ check smoke-tso-switch mine 40 fex.exe "$smoke" FEX_HARDWARETSOSYSCALLS=switch
 check smoke-tso-keep mine 40 fex.exe "$smoke" FEX_HARDWARETSOSYSCALLS=keep
 check smoke-tso-keep-smcchecks-full mine 160 fex.exe "$smoke" FEX_HARDWARETSOSYSCALLS=keep FEX_SMCCHECKS=full
 check smoke-tso-keep-log mine 40 fex.exe "$smoke" FEX_HARDWARETSOSYSCALLS=keep FEX_SILENTLOG=0 WINEDEBUG=
-report tso-keep smoke-tso-keep-log '*FEX: Keeping hardware TSO across syscalls*'
+if [[ $which == mine ]]; then report tso-keep smoke-tso-keep-log '*FEX: Keeping hardware TSO across syscalls*'; fi
 
 # Four threads in a ring of fence-free queues for 60 seconds, a syscall on every pass
 check tsoqueue-switch mine 150 tsoqueue.exe 'gw2 test tsoqueue: passed' FEX_HARDWARETSOSYSCALLS=switch
