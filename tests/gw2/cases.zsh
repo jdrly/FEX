@@ -321,14 +321,15 @@ crash_check
 # deep and in a hot loop, writes into the block it runs in, and suspends a thread spinning in
 # translated code 1,000 times. Under both FEXes without the option, which checks the program,
 # and under mine with it, also with FEX_SMCCHECKS=full. Then, under mine with it on: the crash,
-# Mach9's smoke test in both modes, tsoqueue, tsocalls, codebuf (unset, so the code buffer moves,
-# and at 128) and counters.
+# single steps (#161's singlestep.exe), Mach9's smoke test in both modes, tsoqueue, tsocalls,
+# codebuf (unset, so the code buffer moves, and at 128) and counters.
 lookup=FEX_ENTRYHEADERLOOKUP=1
 entryfault='gw2 test entryfault: passed'
 check entryfault both 120 entryfault.exe "$entryfault"
 check entryfault-lookup mine 120 entryfault.exe "$entryfault" $lookup
 check entryfault-lookup-smcchecks-full mine 160 entryfault.exe "$entryfault" $lookup FEX_SMCCHECKS=full
 if [[ $which == mine ]]; then crash_check crash-lookup $lookup; fi
+check singlestep-lookup mine 60 singlestep.exe 'gw2 test singlestep: passed' $lookup
 check smoke-default-lookup mine 40 fex.exe "$smoke" $lookup
 check smoke-smcchecks-full-lookup mine 160 fex.exe "$smoke" $lookup FEX_SMCCHECKS=full
 check tsoqueue-keep-lookup mine 150 tsoqueue.exe 'gw2 test tsoqueue: passed' FEX_HARDWARETSOSYSCALLS=keep $lookup
