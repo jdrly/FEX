@@ -12,7 +12,7 @@
       "RPRES",
       "AFP"
     ],
-    "BinaryCacheVersion": 52
+    "BinaryCacheVersion": 53
   },
   "Instructions": {
     "vucomiss xmm0, xmm1": {
