@@ -63,8 +63,8 @@
 #   (jdrly/gw2-on-mac#132). It builds nothing of FEX: it takes the build of my FEX that a push
 #   published (fex-arm64-<commit>.tar.xz on arm64-builds) or, failing that, the artifact a pull
 #   request's run left (kept 7 days). tests/gw2/stress.zsh starts counters.exe and Mach9's smoke
-#   program under the engine's FEX and under mine, with FEX_DYNAMICL1CACHE unset and at 0, round
-#   after round. It starts no run after 5 minutes, and the step ends at 7 whatever runs, so the job
+#   program under the engine's FEX, under mine and under mine with FEX_ENTRYHEADERLOOKUP=1, with
+#   FEX_DYNAMICL1CACHE unset and at 0, round after round. It starts no run after 5 minutes, and the step ends at 7 whatever runs, so the job
 #   stays under ten. The summary has the table of passes, crashes and hangs; the artifact
 #   stress-<run id> the logs and samples. It stops at once when another run of this workflow is
 #   queued or running: a manual run takes no slot from a build.
