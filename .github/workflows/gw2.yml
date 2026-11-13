@@ -43,7 +43,8 @@
 #   match) or report (a yes or no from a case's log). engine.zsh's header says how each works.
 # core: FEX's own tests on GitHub's arm64 Linux runner ($CORE_RUNNER), FEX built natively: the
 #   assembly tests (unittests/ASM, unittests/32Bit_ASM) with FEX_HOSTFEATURES=disablesve,disableafp,
-#   since that host has SVE and my Mac doesn't, and the instruction count tests
+#   since that host has SVE and my Mac doesn't, the assembly tests again with
+#   FEX_DISPATCHERL1LOOKUP=1, whose failures have to be the first pass's, and the instruction count tests
 #   (unittests/InstructionCountCI), with each listing whose numbers this commit's JIT changes. The
 #   failures are compared with tests/gw2/core-failures.txt, the engine's commit's: a test that
 #   isn't on that list may not fail; one on it that passes now is reported.
@@ -577,6 +578,16 @@ jobs:
             fi
           }
           suite asm '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp
+          # the same with the dispatcher's L1 lookup on (jdrly/gw2-on-mac#161): every entry of the
+          # harness goes through the dispatcher, and the switch may change no test's result, so its
+          # failures have to be the ones above. Kept out of the reference comparison as a .list.
+          suite asm-l1lookup '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_DISPATCHERL1LOOKUP=1
+          mv "$out/asm-l1lookup.failed" "$out/asm-l1lookup.list"
+          if ! diff <(sed 's/^asm-l1lookup /asm /' "$out/asm-l1lookup.list" | LC_ALL=C sort) <(LC_ALL=C sort "$out/asm.failed") >"$out/asm-l1lookup.diff"; then
+            echo "::error::the asm tests fail differently with FEX_DISPATCHERL1LOOKUP=1 (< with it, > without)"
+            cat "$out/asm-l1lookup.diff"
+            status=1
+          fi
           suite instcountci 'InstCountCI/.*\.instcountci$'
           suite instcountci-update 'InstCountCI/.*new_numbers$'
           git diff --name-only -- unittests/InstructionCountCI | sed 's/^/instcountci-numbers /' >"$out/instcountci-numbers.failed"

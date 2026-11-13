@@ -74,7 +74,14 @@ struct ThreadStats {
   uint64_t AccumulatedDiskCacheHitCount;
   uint64_t AccumulatedDiskCacheMissCount;
   uint64_t AccumulatedDiskCacheLookupTime;
-  uint64_t Padding;
+  // GW2 on Mac (jdrly/gw2-on-mac#161): lookups in C++ (LookupCache::FindBlock) that the thread's L1 answered. Nearly
+  // all come from CompileBlock, which the dispatcher calls when its own lookup finds nothing, and the rest from block
+  // linking. With FEX_DISPATCHERL1LOOKUP the dispatcher looks in L1 itself, and the ones from CompileBlock nearly stop.
+  // This was FEX's padding, and STATS_VERSION stayed 3, so a FEX without this count leaves it 0: 0 means "none, or a
+  // FEX that doesn't count them". A reader can't tell those apart from the version, so none may take it as data until
+  // a later version bump says it is valid. Only my test stage reads it, and it knows it runs my FEX. My Wine fork's
+  // sampler doesn't read it.
+  uint64_t AccumulatedL1LookupHitCount;
 
   // GW2 on Mac (jdrly/gw2-on-mac#117), STATS_VERSION 3. Counted by the Windows frontend and the JIT, each only while
   // the thread has a slot.

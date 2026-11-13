@@ -245,6 +245,46 @@ stats tsocalls-keep mine 300 tsocalls.exe 'gw2 test tsocalls: passed' 'thread <-
   FEX_HARDWARETSOSYSCALLS=keep GW2_TSOCALLS_ITERATIONS=$tsocalls_iterations
 tsocalls_traps tsocalls-keep keep
 
+# jdrly/gw2-on-mac#161: FEX_DISPATCHERL1LOOKUP, the dispatcher's own look in L1. l1lookup.exe
+# (tests/gw2/l1lookup.c) has qsort in ucrtbase.dll call a comparator in the program at least
+# 100,000 times between its two reads, each call an entry from native code and its return an exit
+# into native code. Off, each entry is a lookup in C++ that L1 answers, so l1_hits grows by about
+# the calls (99% to 110%: a shrink of the dynamic L1 sends a few to L3). On, the dispatcher answers
+# them, and l1_hits grows by fewer than 100. native_exits has to grow by at least the calls in both
+# modes, or qsort didn't run as native code and the case proves nothing. Under mine only: the engine's
+# FEX doesn't know the switch, and l1_hits is padding in its slots.
+l1lookup_check() {
+  local label=$1 mode=$2 main calls hits exits r log=()
+  [[ -f $prefix/$label.log ]] && log=(${(f)"$(tr -d '\r' <"$prefix/$label.log")"})
+  main=${${(M)log:#gw2 test l1lookup: tid *}##* }
+  calls=${${(M)log:#gw2 test l1lookup: calls *}##* }
+  [[ $calls == <-> ]] || calls=0
+  hits=$(delta $label 1 2 "$main" l1_hits)
+  exits=$(delta $label 1 2 "$main" native_exits)
+  (( calls >= 100000 && exits >= calls )) && r=ok || r=no
+  verdict $label-native $r "$calls comparator calls, $exits exits into native code, wanted at least 100,000 and at least the calls"
+  if [[ $mode == off ]]; then
+    (( hits >= 0 && 100 * hits >= 99 * calls && 10 * hits <= 11 * calls )) && r=ok || r=no
+    verdict $label-hits $r "$hits L1 hits in C++ for $calls calls, wanted 99% to 110% of them"
+  else
+    (( hits >= 0 && hits < 100 )) && r=ok || r=no
+    verdict $label-hits $r "$hits L1 hits in C++ for $calls calls, wanted fewer than 100"
+  fi
+}
+stats l1lookup-off mine 120 l1lookup.exe 'gw2 test l1lookup: passed' 'thread <->: * l1_hits=<->*' FEX_DISPATCHERL1LOOKUP=0
+if [[ $which == mine ]]; then l1lookup_check l1lookup-off off; fi
+stats l1lookup-on mine 120 l1lookup.exe 'gw2 test l1lookup: passed' 'thread <->: * l1_hits=<->*' FEX_DISPATCHERL1LOOKUP=1
+if [[ $which == mine ]]; then l1lookup_check l1lookup-on on; fi
+
+# Single steps and int3 into code already in L1 (tests/gw2/singlestep.c): each resume goes through
+# the dispatcher, whose trap flag check has to come before its L1 lookup. Under both FEXes with
+# the switch unset, and under mine with it on. Then Mach9's smoke test with it on, with and without
+# FEX_SMCCHECKS=full, whose invalidations clear L1 entries that the dispatcher now reads.
+check singlestep both 60 singlestep.exe 'gw2 test singlestep: passed'
+check singlestep-l1lookup mine 60 singlestep.exe 'gw2 test singlestep: passed' FEX_DISPATCHERL1LOOKUP=1
+check smoke-l1lookup mine 40 fex.exe "$smoke" FEX_DISPATCHERL1LOOKUP=1
+check smoke-l1lookup-smcchecks-full mine 160 fex.exe "$smoke" FEX_DISPATCHERL1LOOKUP=1 FEX_SMCCHECKS=full
+
 # A crash shows as one (jdrly/gw2-on-mac#132). crash.exe prints one line and writes to address 16.
 # With the prefix's crash dialog off (run.zsh), winedbg --auto prints the exception and the
 # backtrace into the log and the program ends with an exit of its own, within seconds. With the

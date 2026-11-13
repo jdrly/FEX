@@ -794,6 +794,16 @@
           "\tswitch: Switch the thread off hardware TSO before the syscall (default)",
           "\tkeep: Leave the thread on, which saves two traps per syscall. Unix calls still switch it off"
         ]
+      },
+      "DispatcherL1Lookup": {
+        "Type": "bool",
+        "Default": "false",
+        "AffectsCodeGen": "false",
+        "Desc": [
+          "Makes the dispatcher look up the thread's L1 cache before it leaves for the lookup in C++.",
+          "A newly compiled block goes into L1 only, so without this every entry from outside JIT code",
+          "(native code calling an x86 callback, a return the call-return stack doesn't match) takes the lookup in C++."
+        ]
       }
     }
   },
