@@ -244,3 +244,30 @@ tsocalls_traps tsocalls-switch switch
 stats tsocalls-keep mine 300 tsocalls.exe 'gw2 test tsocalls: passed' 'thread <->: *' \
   FEX_HARDWARETSOSYSCALLS=keep GW2_TSOCALLS_ITERATIONS=$tsocalls_iterations
 tsocalls_traps tsocalls-keep keep
+
+# A crash shows as one (jdrly/gw2-on-mac#132). crash.exe prints one line and writes to address 16.
+# With the prefix's crash dialog off (run.zsh), winedbg --auto prints the exception and the
+# backtrace into the log and the program ends with an exit of its own, within seconds. With the
+# dialog on, winedbg would sit in it until the 60-second limit (exit 137), and the log would have
+# no backtrace. Under both FEXes: each prefix gets the setting when run.zsh boots it.
+crash_check() {
+  local out rc=0 crashed=no backtrace=no
+  integer start=$SECONDS took
+  out=$("$here/run.zsh" "$wine" "$prefix" crash 60 'gw2 test crash: never' "$tests/crash.exe" 2>&1) || rc=$?
+  took=$(( SECONDS - start ))
+  local log=()
+  [[ -f $prefix/crash.log ]] && log=(${(f)"$(tr -d '\r' <"$prefix/crash.log")"})
+  (( ${log[(I)gw2 test crash: crashing]} )) && crashed=yes
+  (( ${log[(I)Backtrace:]} )) && backtrace=yes
+  if (( rc == 1 )) && [[ $crashed == yes && $backtrace == yes && $out == *', a crash: wine: Unhandled page fault '* &&
+    $out != *'(exit 137'* && $out != *'processes left behind'* ]]; then
+    # outside quotes, where (f) gives lines and (M) keeps the one
+    local line=(${(M)${(f)out}:#FAIL  crash *})
+    print -r -- "ok    crash: ${line[1]#FAIL  crash }, with winedbg's backtrace in crash.log"
+  else
+    print "FAIL  crash: exit $rc after $took s, got to the crash $crashed, backtrace $backtrace"
+    print -r -- "$out" | sed 's/^/      /'
+    failed+=1
+  fi
+}
+crash_check

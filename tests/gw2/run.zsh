@@ -1,9 +1,9 @@
 #!/bin/zsh
-# GitHub's runners only. After each case this script kills every new process of this user whose
-# command names Wine or an .exe (see below). On a machine anyone else uses, that is other people's
-# work: on my Linux server it killed another agent's wait on a run, and on the rented Mac it would be
-# the other project's Wine. So it refuses to start unless GITHUB_ACTIONS=true, or
-# GW2_TEST_ALLOW_KILL=1 says the machine is yours alone.
+# GitHub's runners, or a Mac where GW2_TEST_ALLOW_KILL=1. After each case this script kills every
+# new process of this user that runs from the engine given (see below). Before it went by the
+# command line alone, and on my Linux server it killed another agent's wait on a run. It now takes
+# only executables under <wine>, so another project's Wine on the same user (the rented Mac) is
+# safe, but it still refuses to start unless GITHUB_ACTIONS=true or GW2_TEST_ALLOW_KILL=1.
 #
 # gw2 (jdrly/gw2-on-mac#109): run one Win64 program under an engine, in a scratch prefix,
 # without a window, the way Mach9's smoke test runs its programs (athei/mach9 at v0.3.1,
@@ -12,7 +12,10 @@
 #
 #   run.zsh <wine> <prefix> <label> <seconds> <want> <exe> [<VAR=value>...]
 #
-# <wine> is an unpacked engine (the release tarball's wine/). The prefix is booted the first time.
+# <wine> is an unpacked engine (the release tarball's wine/). The prefix is booted the first time,
+# with Wine's crash dialog off (HKCU\Software\Wine\WineDbg, ShowCrashDialog=0): a program that
+# crashes then gets winedbg --auto's exception, registers, backtrace, modules and threads in its
+# log and ends, where the dialog would hold it until the time limit (jdrly/gw2-on-mac#132).
 # WINEDEBUG is -all unless a <VAR=value> sets it; each <VAR=value> is set for this run only. The
 # program's output goes to <prefix>/<label>.log. It has to print the line <want> and exit 0
 # within <seconds>.
@@ -27,19 +30,22 @@
 # Afterwards the prefix's wineserver is stopped (30 seconds at most for each of its two calls), and
 # no process this script started may be left.
 # This run's processes are the ones of this user that weren't there when the script started, and
-# those with a variable of this run in their environment. The variable alone doesn't do: on the
+# those with a variable of this run in their environment, whose executable is under <wine>: only
+# this engine's processes, never another project's Wine on the same user. The variable alone doesn't do: on the
 # runner, ps -E showed it for none of Wine's processes (run 43297396698), as Wine rewrites what
 # ps reads there. A process left behind is one of them whose command names Wine or an .exe. Prints one line, and the log when the
 # run failed; exits 1 then.
 #
 # When the program runs out of time, the watchdog first samples every Wine process of the run into
 # <prefix>/<label>.hang.<pid>.log (jdrly/gw2-on-mac#132), and the failure names those files.
+# When Wine reported the program with "wine: Unhandled …", the failure line says it crashed and
+# quotes that line.
 emulate -L zsh
 setopt err_exit pipe_fail no_unset extended_glob
 
 if [[ ${GITHUB_ACTIONS:-} != true && ${GW2_TEST_ALLOW_KILL:-} != 1 ]]; then
-  print -u2 "run.zsh: not on a GitHub runner. It kills every new process of this user that names Wine or an .exe,"
-  print -u2 "other people's included. Set GW2_TEST_ALLOW_KILL=1 only on a machine that is yours alone."
+  print -u2 "run.zsh: not on a GitHub runner. It kills every new process of this user that runs from the engine given."
+  print -u2 "Set GW2_TEST_ALLOW_KILL=1 only on a Mac where that engine is yours."
   exit 2
 fi
 
@@ -105,10 +111,21 @@ mine_now() {
 }
 before=(${(f)"$(mine_now)"})
 
-# the pids of this run's processes: the ones since the script started, and the marked ones
+# the pids of this run's processes: the ones since the script started, and the marked ones, whose
+# executable is under <wine>. Another project's Wine on the same user has the same process names
+# and may start while this runs, so neither a name nor a start time alone tells them apart
+# (macOS's proc_pidpath gives the executable's real path; Wine rewrites the command line).
 started() {
   local now=(${(f)"$(mine_now)"})
-  print -l -- ${(u)${now:|before}} $(marked)
+  local pids=(${(u)${now:|before}} $(marked))
+  (( ${#pids} )) || return 0
+  /usr/bin/python3 -I -c '
+import ctypes, sys
+proc = ctypes.CDLL("/usr/lib/libproc.dylib")
+buf = ctypes.create_string_buffer(4096)
+for pid in sys.argv[2:]:
+    if proc.proc_pidpath(int(pid), buf, len(buf)) > 0 and buf.value.decode(errors="replace").startswith(sys.argv[1]):
+        print(pid)' "$wine/" $pids
 }
 
 # pid and command of this run's processes whose command names Wine or an .exe, but not this
@@ -174,9 +191,11 @@ said() {
 
 mkdir -p "$prefix"
 if [[ ! -f $prefix/system.reg ]]; then
-  # wineboot took 16 s in Mach9's release run
+  # wineboot took 16 s in Mach9's release run. The first program boots the prefix, and this one
+  # turns the crash dialog off (winedbg reads ShowCrashDialog there, programs/winedbg/crashdlg.c).
   rc=0
-  run_limited 600 "$prefix/boot.log" "$wine/bin/wine" cmd /c exit || rc=$?
+  run_limited 600 "$prefix/boot.log" "$wine/bin/wine" reg add 'HKCU\Software\Wine\WineDbg' \
+    /v ShowCrashDialog /t REG_DWORD /d 0 /f || rc=$?
   if (( rc )); then
     print "FAIL  $label: the prefix boot (exit $rc)"
     sed 's/^/      /' "$prefix/boot.log"
@@ -239,7 +258,11 @@ else
 fi
 
 if (( rc != 0 )) || ! said "$want"; then
-  print "FAIL  $label (exit $rc$( (( rc == 137 )) && print ', the time limit' )) after $(( SECONDS - t0 )) s"
+  why=
+  (( rc != 137 )) || why=', the time limit'
+  crash=(${(M)${(f)"$(loglines)"}:#wine: Unhandled *})
+  (( ! ${#crash} )) || why+=", a crash: $crash[1]"
+  print -r -- "FAIL  $label (exit $rc$why) after $(( SECONDS - t0 )) s"
   samples=("$prefix/$label".hang.<->.log(Nn))
   (( ! ${#samples} )) || print "      where it stood: ${(j:, :)${samples:t}} (the engine-tests artifact)"
   sed 's/^/      /' "$log"
