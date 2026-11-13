@@ -268,7 +268,8 @@ namespace CPU {
   }()};
 
   CPUBackend::CPUBackend(SharedCodeBufferManager& SharedCodeBuffers, FEXCore::Core::InternalThreadState* ThreadState)
-    : ThreadState(ThreadState)
+    : EntryHeaderLookup(FEXCore::Config::Get_ENTRYHEADERLOOKUP() && !FEXCore::Config::Get_ENABLECODECACHINGWIP())
+    , ThreadState(ThreadState)
     , SharedCodeBuffers(SharedCodeBuffers) {
 
     auto& Ptrs = ThreadState->CurrentFrame->Pointers;
@@ -354,6 +355,32 @@ namespace CPU {
       }
     }
     return false;
+  }
+
+  uint64_t CPUBackend::FindBlockHeader(uintptr_t HostPC) const {
+    if (!EntryHeaderLookup) {
+      return 0;
+    }
+
+    const auto Check = [HostPC](CodeBuffer& Buffer) -> uint64_t {
+      const auto Begin = Buffer.FindBlock(HostPC);
+      if (!Begin) {
+        return 0;
+      }
+      const auto Header = reinterpret_cast<const JITCodeHeader*>(Begin);
+      const auto Tail = reinterpret_cast<const JITCodeTail*>(Begin + Header->OffsetToBlockTail);
+      return HostPC < reinterpret_cast<uintptr_t>(Begin) + Tail->Size ? reinterpret_cast<uint64_t>(Begin) : 0;
+    };
+
+    if (const auto Header = Check(*CurrentCodeBuffer)) {
+      return Header;
+    }
+    for (const auto& Buffer : SignalHandlerCodeBuffers) {
+      if (const auto Header = Check(*Buffer)) {
+        return Header;
+      }
+    }
+    return 0;
   }
 
 } // namespace CPU

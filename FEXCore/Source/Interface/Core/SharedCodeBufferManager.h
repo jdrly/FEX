@@ -11,7 +11,9 @@ $end_info$
 #include <FEXCore/Utils/MathUtils.h>
 #include <FEXCore/Utils/SignalScopeGuards.h>
 #include <FEXCore/Utils/TypeDefines.h>
+#include <FEXCore/fextl/vector.h>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -84,7 +86,18 @@ struct CodeBuffer {
   // Trivially reset the allocator.
   void Reset() {
     CodeBufferOffset = Ptr;
+    while (BlockStartsLock.test_and_set(std::memory_order_acquire)) {
+    }
+    BlockStarts.clear();
+    BlockStartsLock.clear(std::memory_order_release);
   }
+
+  // With FEX_ENTRYHEADERLOOKUP the JIT stores no block header pointer at its entry points
+  // (CPUState::InlineJITBlockHeader): the paths that need the block a host PC lies in (fault handling, RIP
+  // reconstruction) find it here. Every block compiled into this buffer registers its start; FindBlock returns the
+  // last start at or below Address, or nullptr. The caller checks that Address lies within that block.
+  void RegisterBlock(const uint8_t* BlockBegin);
+  const uint8_t* FindBlock(uintptr_t Address);
 
   // Returns the base of the buffer.
   uint8_t* GetBufferBase() const {
@@ -98,6 +111,10 @@ private:
 
   // Code buffer allocation information.
   std::atomic<uint8_t*> CodeBufferOffset {};
+
+  // Block starts as offsets from Ptr, ascending. Spin lock: held only for a vector insert or a binary search.
+  std::atomic_flag BlockStartsLock {};
+  fextl::vector<uint32_t> BlockStarts;
 };
 
 /**

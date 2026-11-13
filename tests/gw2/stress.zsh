@@ -1,7 +1,8 @@
 #!/bin/zsh
 # gw2 (jdrly/gw2-on-mac#132): how often counters.exe and Mach9's smoke program crash or hang, under
-# the engine's FEX and under mine, with FEX_DYNAMICL1CACHE unset and at 0. The manual job of
-# .github/workflows/gw2.yml runs it, on my word only.
+# the engine's FEX and under mine, with FEX_DYNAMICL1CACHE unset and at 0. Mine runs twice, the
+# second time with FEX_ENTRYHEADERLOOKUP=1 (jdrly/gw2-on-mac#162, "lookup" in the table and the
+# work dir). The manual job of .github/workflows/gw2.yml runs it, on my word only.
 #
 #   stress.zsh <engine wine> <my wine> <tests dir> <work dir> <rounds> <seconds> <report>
 #
@@ -24,14 +25,14 @@
 # crash"); hung (killed at its time limit, exit 137); failed otherwise. <report> gets a Markdown
 # table of them, a line for each run that didn't pass, and each run's time, written again after
 # every run: a job that stops this script at its own time limit still has the table so far. The
-# logs are <work dir>/<engine or mine>/<label>.log, the samples of a hang beside them. Exits 0
+# logs are <work dir>/<engine, mine or lookup>/<label>.log, the samples of a hang beside them. Exits 0
 # unless its arguments are wrong: a crash here is a finding, not a failure.
 emulate -L zsh
 setopt err_exit pipe_fail no_unset extended_glob
 
 (( $# == 7 )) || { print -u2 "usage: stress.zsh <engine wine> <my wine> <tests dir> <work dir> <rounds> <seconds> <report>"; exit 2 }
 [[ $5 == <1-> && $6 == <1-> ]] || { print -u2 "stress.zsh: <rounds> and <seconds> are whole numbers above 0"; exit 2 }
-typeset -A wines=(engine ${1:A} mine ${2:A}) names=(engine "the engine's" mine mine)
+typeset -A wines=(engine ${1:A} mine ${2:A} lookup ${2:A}) names=(engine "the engine's" mine mine lookup "mine, FEX_ENTRYHEADERLOOKUP=1")
 tests=${3:A} work=${4:A} out_file=${7:A}
 integer rounds=$5 budget=$6 round start=$SECONDS t rc
 here=${0:A:h}
@@ -41,7 +42,7 @@ typeset -a combos notes
 typeset -A runs passed crashed hung other secs
 for program in smoke counters; do
   for l1 in 0 unset; do
-    for which in mine engine; do
+    for which in mine lookup engine; do
       combos+=($program:$which:$l1)
     done
   done
@@ -63,7 +64,7 @@ report() {
     done
     print
     if (( ${#notes} )); then
-      print "Runs that didn't pass (logs and samples in the stress artifact, under engine/ and mine/):\n"
+      print "Runs that didn't pass (logs and samples in the stress artifact, under engine/, mine/ and lookup/):\n"
       print -rl -- $notes
     else
       print "No run failed."
@@ -80,9 +81,10 @@ for (( round = 1; round <= rounds; round++ )); do
     label=$program-l1-$l1-$round
     vars=()
     [[ $l1 == unset ]] || vars=(FEX_DYNAMICL1CACHE=$l1)
+    [[ $which != lookup ]] || vars+=(FEX_ENTRYHEADERLOOKUP=1)
     mkdir -p "$work/$which"
     rc=0 t=$SECONDS
-    if [[ $program == counters && $which == mine ]]; then
+    if [[ $program == counters && $which != engine ]]; then
       out=$(GW2_TEST_READER="$tests/fexstats --header" "$here/run.zsh" "$wines[$which]" "$work/$which" "$label" 120 \
         'gw2 test counters: passed' "$tests/counters.exe" $vars FEX_PROFILESTATS=1 2>&1) || rc=$?
     elif [[ $program == counters ]]; then
