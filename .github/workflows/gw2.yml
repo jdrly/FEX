@@ -54,6 +54,16 @@
 # publish: after the others are green, packs fex-arm64-<commit>.tar.xz and prints its sha256. For a
 #   push to gw2-on-mac it adds it to the pre-release arm64-builds, the one release this workflow
 #   makes, never marked latest, and keeps the 30 newest.
+# stress: on my word only, a manual run (gh workflow run gw2.yml --repo jdrly/FEX --ref <branch>
+#   [-f fex=<commit>] [-f rounds=<n>]), which runs this job and nothing else
+#   (jdrly/gw2-on-mac#132). It builds nothing of FEX: it takes the build of my FEX that a push
+#   published (fex-arm64-<commit>.tar.xz on arm64-builds) or, failing that, the artifact a pull
+#   request's run left (kept 7 days). tests/gw2/stress.zsh starts counters.exe and Mach9's smoke
+#   program under the engine's FEX and under mine, with FEX_DYNAMICL1CACHE unset and at 0, round
+#   after round. It starts no run after 5 minutes, and the step ends at 7 whatever runs, so the job
+#   stays under ten. The summary has the table of passes, crashes and hangs; the artifact
+#   stress-<run id> the logs and samples. It stops at once when another run of this workflow is
+#   queued or running: a manual run takes no slot from a build.
 name: GW2
 
 on:
@@ -61,12 +71,24 @@ on:
     branches: [gw2-on-mac]
   push:
     branches: [gw2-on-mac]
+  workflow_dispatch:
+    inputs:
+      fex:
+        description: "The commit whose build of my FEX to test (a sha or a branch). Empty: the commit this runs on"
+        required: false
+        default: ""
+      rounds:
+        description: "At most this many runs of each program, FEX and FEX_DYNAMICL1CACHE"
+        required: false
+        default: "10"
 
 permissions:
   contents: read
 
 concurrency:
-  group: gw2-${{ github.event.pull_request.number || github.ref }}
+  # a manual run has a group of its own, so it never takes the place of a push's run waiting in
+  # the group of gw2-on-mac
+  group: gw2-${{ github.event_name == 'workflow_dispatch' && format('stress-{0}', github.run_id) || github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -105,6 +127,7 @@ defaults:
 jobs:
   build:
     name: Build my FEX for the arm64 engine
+    if: github.event_name != 'workflow_dispatch'
     runs-on: *runner
     timeout-minutes: 150
     # One build at a time in this repository, whatever the pull request or branch: a second one
@@ -478,6 +501,7 @@ jobs:
 
   core:
     name: FEX's own tests (arm64 Linux)
+    if: github.event_name != 'workflow_dispatch'
     runs-on: *core_runner
     timeout-minutes: 150
     env:
@@ -592,6 +616,7 @@ jobs:
 
   lint:
     name: Lint
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -670,3 +695,125 @@ jobs:
           latest=$(gh api "repos/$GH_REPO/releases/latest" -q .tag_name 2>/dev/null || true)
           echo "releases/latest: ${latest:-none}"
           [[ $latest != "$RELEASE" ]]
+
+  # A manual run's only job (jdrly/gw2-on-mac#132), see the top. Not in the builds' group
+  # gw2-macos-build: GitHub keeps one waiting job per group, so a manual run waiting there could
+  # take the place of a push's build, which then never publishes. It checks for other runs instead.
+  stress:
+    name: Crashes and hangs at process start
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: *runner
+    timeout-minutes: 12
+    permissions:
+      contents: read
+      actions: read
+    env:
+      FEX: ${{ inputs.fex || github.sha }}
+      ROUNDS: ${{ inputs.rounds }}
+      MINGW_DIR: /Users/runner/llvm-mingw
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      # One run at a time in this repository (AGENTS.md). A push that comes while this runs still
+      # runs beside it.
+      - name: No other run
+        run: |
+          others=$(gh run list --workflow gw2.yml --limit 50 --json databaseId,status \
+            -q "[.[] | select(.databaseId != $GITHUB_RUN_ID and .status != \"completed\")] | map(.databaseId) | join(\" \")")
+          [[ -z $others ]] || { echo "::error::other runs of this workflow are queued or running: $others"; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: src
+          persist-credentials: false
+      # the build's caches, filled by its runs
+      - name: Restore Mach9
+        id: mach9
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: mach9-tarball-${{ env.MACH9_VERSION }}
+          path: toolchains/mach9.tar.xz
+      - name: Download Mach9
+        if: steps.mach9.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p toolchains
+          curl -fsSL --retry 3 -o toolchains/mach9.tar.xz \
+            "https://github.com/athei/mach9/releases/download/$MACH9_VERSION/wine-$MACH9_VERSION-macos-arm64.tar.xz"
+      - name: Restore llvm-mingw
+        id: mingw
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: llvm-mingw-${{ env.LLVM_MINGW_VERSION }}
+          path: ${{ env.MINGW_DIR }}
+      - name: Download llvm-mingw
+        if: steps.mingw.outputs.cache-hit != 'true'
+        run: |
+          f="llvm-mingw-$LLVM_MINGW_VERSION-ucrt-macos-universal.tar.xz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$f" "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_VERSION/$f"
+          echo "$LLVM_MINGW_SHA256  $RUNNER_TEMP/$f" | shasum -a 256 -c
+          mkdir -p "$MINGW_DIR"
+          tar -xf "$RUNNER_TEMP/$f" -C "$MINGW_DIR" --strip-components 1
+      # The pre-release's file of a push, or else the artifact of the newest run that left one
+      - name: My FEX
+        run: |
+          commit=$(gh api "repos/$GH_REPO/commits/$FEX" -q .sha)
+          f=fex-arm64-$commit
+          mkdir -p "$RUNNER_TEMP/fex"
+          if gh release download arm64-builds -p "$f.tar.xz" -D "$RUNNER_TEMP"; then
+            tar -xJf "$RUNNER_TEMP/$f.tar.xz" -C "$RUNNER_TEMP/fex"
+            from="$f.tar.xz on arm64-builds"
+          else
+            run=$(gh api "repos/$GH_REPO/actions/artifacts?name=$f" -q '[.artifacts[] | select(.expired | not)][0].workflow_run.id // empty')
+            [[ -n $run ]] || { echo "::error::$commit has neither $f.tar.xz on arm64-builds nor an artifact $f"; exit 1; }
+            gh run download "$run" -n "$f" -D "$RUNNER_TEMP/fex"
+            from="the artifact $f of run $run"
+          fi
+          {
+            echo "my FEX: $from"
+            echo '```'
+            sed -n 1,3p "$RUNNER_TEMP/fex/VERSION"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      # as the build job builds them
+      - name: The programs
+        run: |
+          echo "$MACH9_SHA256  toolchains/mach9.tar.xz" | shasum -a 256 -c
+          t=$RUNNER_TEMP/tests
+          mkdir -p "$t"
+          curl -fsSL --retry 3 -o "$t/fex.c" "https://raw.githubusercontent.com/athei/mach9/$MACH9_COMMIT/smoke/fex.c"
+          echo "$FEX_SMOKE_SHA256  $t/fex.c" | shasum -a 256 -c
+          "$MINGW_DIR/bin/x86_64-w64-mingw32-clang" -O2 -o "$t/fex.exe" "$t/fex.c"
+          "$MINGW_DIR/bin/x86_64-w64-mingw32-clang" -O2 -Wall -Werror -o "$t/counters.exe" src/tests/gw2/counters.c
+          /usr/bin/clang++ -std=c++20 -O2 -Wall -Werror -DARCHITECTURE_arm64 -o "$t/fexstats" src/tests/gw2/native/fexstats.cpp \
+            -Isrc/FEXCore/include -Isrc/Source
+          e=$RUNNER_TEMP/engine-own m=$RUNNER_TEMP/engine-mine
+          mkdir -p "$e"
+          tar -xf toolchains/mach9.tar.xz -C "$e"
+          cp -Rc "$e" "$m"
+          w=$m/wine/lib/wine
+          install -m 755 "$RUNNER_TEMP/fex/aarch64-windows/libarm64ecfex.dll" "$w/aarch64-windows/libarm64ecfex.dll"
+          install -m 755 "$RUNNER_TEMP/fex/aarch64-windows/libarm64ecfex.dll" "$w/aarch64-windows/xtajit64.dll"
+          install -m 755 "$RUNNER_TEMP/fex/aarch64-unix/libarm64ecfex.so" "$w/aarch64-unix/libarm64ecfex.so"
+          xattr -drs com.apple.quarantine "$e" "$m"
+      - name: Run them
+        timeout-minutes: 7
+        run: |
+          src/tests/gw2/stress.zsh "$RUNNER_TEMP/engine-own/wine" "$RUNNER_TEMP/engine-mine/wine" "$RUNNER_TEMP/tests" \
+            "$RUNNER_TEMP/stress" "$ROUNDS" 300 "$RUNNER_TEMP/stress.md"
+      # also after the step's time limit: the table as far as it got
+      - name: The table
+        if: always()
+        run: |
+          if [[ -f $RUNNER_TEMP/stress.md ]]; then
+            tee -a "$GITHUB_STEP_SUMMARY" <"$RUNNER_TEMP/stress.md"
+          else
+            echo "no table: stress.zsh didn't start"
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: stress-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/stress/*/*.log
+            ${{ runner.temp }}/stress/*/*.reader.*
+          retention-days: 7
