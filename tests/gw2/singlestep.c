@@ -14,8 +14,8 @@
  *
  * Prints one line for each and "gw2 test singlestep: passed" when both hold. */
 #include <stdint.h>
-
-#include "gw2test.h"
+#include <stdio.h>
+#include <windows.h>
 
 void step_target(void);
 void step_run(void);
