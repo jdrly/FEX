@@ -133,6 +133,14 @@ namespace CPU {
 
     bool IsAddressInCodeBuffer(uintptr_t Address) const;
 
+    // FEX_ENTRYHEADERLOOKUP, off while EnableCodeCachingWIP is on: the blocks of a mapped code cache file are in no
+    // CodeBuffer's index, so their entry points keep storing the header.
+    const bool EntryHeaderLookup;
+
+    // With EntryHeaderLookup, the start of the block (its JITCodeHeader) that HostPC lies in, from the code buffers'
+    // block indexes, or 0. Always 0 without it.
+    uint64_t FindBlockHeader(uintptr_t HostPC) const;
+
     // Updates the CodeBuffer if needed and returns a reference to the old one.
     // The returned reference should be kept alive carefully to avoid early deletion of resources.
     [[nodiscard]]

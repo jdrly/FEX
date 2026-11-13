@@ -46,8 +46,11 @@
 #   since that host has SVE and my Mac doesn't, the assembly tests again with
 #   FEX_DISPATCHERL1LOOKUP=1, whose failures have to be the first pass's, and the instruction count tests
 #   (unittests/InstructionCountCI), with each listing whose numbers this commit's JIT changes. The
-#   failures are compared with tests/gw2/core-failures.txt, the engine's commit's: a test that
-#   isn't on that list may not fail; one on it that passes now is reported.
+#   assembly and instruction count tests run once more with FEX_ENTRYHEADERLOOKUP=1
+#   (jdrly/gw2-on-mac#162), and a block's entry, as CodeSizeValidation measures it, has to be two
+#   instructions shorter with it. The failures are compared with tests/gw2/core-failures.txt, the
+#   engine's commit's, whose lines count for the runs with the option too: a test that isn't on
+#   that list may not fail; one on it that passes now is reported.
 # Since 2026-11-12 it runs on GitHub's Xcode 27 image: macos-26 runners weren't being assigned, and I
 # have no Mac of my own for it. Xcode 27's clang isn't the engine's, so the .so files get the
 # structural gate. Going back is one edit: RUNNER and XCODE_VERSION below to the engine's values.
@@ -588,10 +591,24 @@ jobs:
             cat "$out/asm-l1lookup.diff"
             status=1
           fi
+          suite asm-lookup '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_ENTRYHEADERLOOKUP=1
           suite instcountci 'InstCountCI/.*\.instcountci$'
           suite instcountci-update 'InstCountCI/.*new_numbers$'
           git diff --name-only -- unittests/InstructionCountCI | sed 's/^/instcountci-numbers /' >"$out/instcountci-numbers.failed"
+          # after the diff: this run writes the new numbers files too
+          suite instcountci-lookup 'InstCountCI/.*\.instcountci$' FEX_ENTRYHEADERLOOKUP=1
           LC_ALL=C sort "$out"/*.failed >"$out/failures"
+          # a block's entry, from CodeSizeValidation's NOP block, with FEX_ENTRYHEADERLOOKUP off and on
+          for v in 0 1; do
+            FEX_ENTRYHEADERLOOKUP=$v build/Bin/CodeSizeValidation build/unittests/InstructionCountCI/Primary.json.instcountci 2>&1 |
+              grep -m 1 '^Block entry: ' >"$out/entry-$v" || true
+            echo "FEX_ENTRYHEADERLOOKUP=$v: $(cat "$out/entry-$v")" | tee -a "$out/totals"
+          done
+          off=$(sed -n 's/^Block entry: \([0-9]*\) .*/\1/p' "$out/entry-0") on=$(sed -n 's/^Block entry: \([0-9]*\) .*/\1/p' "$out/entry-1")
+          if [[ -z $off || -z $on ]] || (( on != off - 2 )); then
+            echo "::error::a block's entry has to be two instructions shorter with FEX_ENTRYHEADERLOOKUP=1: ${off:-none} off, ${on:-none} on"
+            status=1
+          fi
           exit "$status"
       - name: Against the reference list
         run: |
@@ -608,11 +625,13 @@ jobs:
             echo "::error::no reference list $ref yet"
             exit 1
           fi
-          new=$(LC_ALL=C comm -23 "$out/failures" "$ref")
-          fixed=$(LC_ALL=C comm -13 "$out/failures" "$ref")
+          # the suites run again with FEX_ENTRYHEADERLOOKUP=1 have the same reference as without it
+          LC_ALL=C sort "$ref" <(sed -n 's/^asm /asm-lookup /p; s/^instcountci /instcountci-lookup /p' "$ref") >"$out/reference"
+          new=$(LC_ALL=C comm -23 "$out/failures" "$out/reference")
+          fixed=$(LC_ALL=C comm -13 "$out/failures" "$out/reference")
           {
             if [[ -z $new && -z $fixed ]]; then
-              echo "- the same $(grep -c . "$ref" || true) failures as $ref"
+              echo "- the same $(grep -c . "$out/reference" || true) failures as $ref, its asm and instcountci lines also for the runs with FEX_ENTRYHEADERLOOKUP=1"
             fi
             [[ -z $fixed ]] || { echo "- on the reference list and passing now:"; echo '```'; echo "$fixed"; echo '```'; }
             [[ -z $new ]] || { echo "- **failing and not on the reference list:**"; echo '```'; echo "$new"; echo '```'; }

@@ -804,6 +804,16 @@
           "A newly compiled block goes into L1 only, so without this every entry from outside JIT code",
           "(native code calling an x86 callback, a return the call-return stack doesn't match) takes the lookup in C++."
         ]
+      },
+      "EntryHeaderLookup": {
+        "Type": "bool",
+        "Default": "false",
+        "AffectsCodeGen": "true",
+        "Desc": [
+          "A block's entry points stop storing the block's header into CPUState::InlineJITBlockHeader.",
+          "Faults, suspends, self-modifying code and the unaligned atomic handler find the block from the host PC instead.",
+          "Has no effect while EnableCodeCachingWIP is on."
+        ]
       }
     }
   },

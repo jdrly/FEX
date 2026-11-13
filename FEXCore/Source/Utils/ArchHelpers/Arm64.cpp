@@ -2047,6 +2047,8 @@ std::optional<int32_t> HandleUnalignedAccess(FEXCore::Core::InternalThreadState*
   }
 
   const auto Frame = Thread->CurrentFrame;
+  // With EntryHeaderLookup the JIT doesn't record the current block at its entry points: find it from the faulting PC
+  Thread->CTX->SyncCurrentBlock(Thread, ProgramCounter);
   const uint64_t BlockBegin = Frame->State.InlineJITBlockHeader;
   auto InlineHeader = reinterpret_cast<const CPU::CPUBackend::JITCodeHeader*>(BlockBegin);
   auto InlineTail = reinterpret_cast<CPU::CPUBackend::JITCodeTail*>(Frame->State.InlineJITBlockHeader + InlineHeader->OffsetToBlockTail);

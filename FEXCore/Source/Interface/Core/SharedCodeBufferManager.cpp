@@ -7,6 +7,8 @@
 #include <FEXCore/Utils/LogManager.h>
 #include <FEXCore/Utils/MathUtils.h>
 
+#include <algorithm>
+
 #ifndef _WIN32
 #include <FEXCore/Utils/PrctlUtils.h>
 #endif
@@ -43,6 +45,38 @@ CodeBuffer::CodeBuffer(size_t Size, bool ShouldBeNamed)
 
 CodeBuffer::~CodeBuffer() {
   FEXCore::Allocator::VirtualFree(Ptr, AllocatedSize);
+}
+
+void CodeBuffer::RegisterBlock(const uint8_t* BlockBegin) {
+  const auto Offset = static_cast<uint32_t>(BlockBegin - Ptr);
+  while (BlockStartsLock.test_and_set(std::memory_order_acquire)) {
+  }
+  // Blocks are allocated in ascending order, but a concurrent compile can register out of order
+  auto It = BlockStarts.end();
+  while (It != BlockStarts.begin() && *(It - 1) > Offset) {
+    --It;
+  }
+  if (It == BlockStarts.begin() || *(It - 1) != Offset) {
+    BlockStarts.insert(It, Offset);
+  }
+  BlockStartsLock.clear(std::memory_order_release);
+}
+
+const uint8_t* CodeBuffer::FindBlock(uintptr_t Address) {
+  const auto Base = reinterpret_cast<uintptr_t>(Ptr);
+  if (Address < Base || Address >= Base + UsableSize()) {
+    return nullptr;
+  }
+  const auto Offset = Address - Base;
+  const uint8_t* Result = nullptr;
+  while (BlockStartsLock.test_and_set(std::memory_order_acquire)) {
+  }
+  auto It = std::upper_bound(BlockStarts.begin(), BlockStarts.end(), Offset);
+  if (It != BlockStarts.begin()) {
+    Result = Ptr + *(It - 1);
+  }
+  BlockStartsLock.clear(std::memory_order_release);
+  return Result;
 }
 
 SharedCodeBufferManager::SharedCodeBufferManager() {

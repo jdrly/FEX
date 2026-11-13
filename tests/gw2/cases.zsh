@@ -290,24 +290,52 @@ check smoke-l1lookup-smcchecks-full mine 160 fex.exe "$smoke" FEX_DISPATCHERL1LO
 # backtrace into the log and the program ends with an exit of its own, within seconds. With the
 # dialog on, winedbg would sit in it until the 60-second limit (exit 137), and the log would have
 # no backtrace. Under both FEXes: each prefix gets the setting when run.zsh boots it.
+# crash_check [<label> <VAR=value>...]: the case under that label, crash by default, with those
+# variables
 crash_check() {
-  local out rc=0 crashed=no backtrace=no
+  local label=${1:-crash} out rc=0 crashed=no backtrace=no
+  (( $# )) && shift
   integer start=$SECONDS took
-  out=$("$here/run.zsh" "$wine" "$prefix" crash 60 'gw2 test crash: never' "$tests/crash.exe" 2>&1) || rc=$?
+  out=$("$here/run.zsh" "$wine" "$prefix" $label 60 'gw2 test crash: never' "$tests/crash.exe" "$@" 2>&1) || rc=$?
   took=$(( SECONDS - start ))
   local log=()
-  [[ -f $prefix/crash.log ]] && log=(${(f)"$(tr -d '\r' <"$prefix/crash.log")"})
+  [[ -f $prefix/$label.log ]] && log=(${(f)"$(tr -d '\r' <"$prefix/$label.log")"})
   (( ${log[(I)gw2 test crash: crashing]} )) && crashed=yes
   (( ${log[(I)Backtrace:]} )) && backtrace=yes
   if (( rc == 1 )) && [[ $crashed == yes && $backtrace == yes && $out == *', a crash: wine: Unhandled page fault '* &&
     $out != *'(exit 137'* && $out != *'processes left behind'* ]]; then
     # outside quotes, where (f) gives lines and (M) keeps the one
-    local line=(${(M)${(f)out}:#FAIL  crash *})
-    print -r -- "ok    crash: ${line[1]#FAIL  crash }, with winedbg's backtrace in crash.log"
+    local line=(${(M)${(f)out}:#FAIL  $label *})
+    print -r -- "ok    $label: ${line[1]#FAIL  $label }, with winedbg's backtrace in $label.log"
   else
-    print "FAIL  crash: exit $rc after $took s, got to the crash $crashed, backtrace $backtrace"
+    print "FAIL  $label: exit $rc after $took s, got to the crash $crashed, backtrace $backtrace"
     print -r -- "$out" | sed 's/^/      /'
     failed+=1
   fi
 }
 crash_check
+
+# jdrly/gw2-on-mac#162: FEX_ENTRYHEADERLOOKUP=1, under which no block entry stores its header and
+# FEX finds the block of a fault, suspend or SMC write from the host PC. entryfault.exe
+# (tests/gw2/entryfault.c) faults at a function's first block, after a call returns, three calls
+# deep and in a hot loop, writes into the block it runs in, and suspends a thread spinning in
+# translated code 1,000 times. Under both FEXes without the option, which checks the program,
+# and under mine with it, also with FEX_SMCCHECKS=full. Then, under mine with it on: the crash,
+# Mach9's smoke test in both modes, tsoqueue, tsocalls, codebuf (unset, so the code buffer moves,
+# and at 128) and counters.
+lookup=FEX_ENTRYHEADERLOOKUP=1
+entryfault='gw2 test entryfault: passed'
+check entryfault both 120 entryfault.exe "$entryfault"
+check entryfault-lookup mine 120 entryfault.exe "$entryfault" $lookup
+check entryfault-lookup-smcchecks-full mine 160 entryfault.exe "$entryfault" $lookup FEX_SMCCHECKS=full
+if [[ $which == mine ]]; then crash_check crash-lookup $lookup; fi
+check smoke-default-lookup mine 40 fex.exe "$smoke" $lookup
+check smoke-smcchecks-full-lookup mine 160 fex.exe "$smoke" $lookup FEX_SMCCHECKS=full
+check tsoqueue-keep-lookup mine 150 tsoqueue.exe 'gw2 test tsoqueue: passed' FEX_HARDWARETSOSYSCALLS=keep $lookup
+stats tsocalls-keep-lookup mine 300 tsocalls.exe 'gw2 test tsocalls: passed' 'thread <->: *' \
+  FEX_HARDWARETSOSYSCALLS=keep GW2_TSOCALLS_ITERATIONS=$tsocalls_iterations $lookup
+tsocalls_traps tsocalls-keep-lookup keep
+codebuf codebuf-unset-lookup discard mine $lookup
+codebuf codebuf-128-lookup keep mine FEX_INITIALCODEBUFFERMB=128 FEX_SILENTLOG=0 $lookup
+stats counters-lookup mine 300 counters.exe "$counters" "$counted<1->" $lookup
+if [[ $which == mine ]]; then counters_check counters-lookup '<1->'; fi
