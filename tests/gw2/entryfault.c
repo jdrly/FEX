@@ -20,7 +20,11 @@
  *           into the block it runs in (inline self-modifying code). The page is reset to 1 before
  *           each of three calls.
  *
- *   suspend a thread spins in a loop that never leaves translated code. The main thread suspends
+ *   suspend a thread spins in a loop that never leaves translated code. FEX checks for a suspend
+ *           at block entries and unconditional backward jumps, not at a conditional backward
+ *           branch, so the loop leaves through a forward branch and closes with a jmp. Under
+ *           both FEXes a thread in a loop closed by "je" back can't be suspended at all: Wine's
+ *           GetThreadContext waits for it for good (run 43452320908). The main thread suspends
  *           it 1,000 times, and each time its context has to show Rip inside the loop and its
  *           counter register equal to the counter in memory or one ahead (between the add and
  *           the store). After each resume the counter has to move on. At the end the thread
@@ -110,7 +114,8 @@ __asm__(".text\n"
         "  incq %rax\n"
         "  movq %rax, (%rcx)\n"
         "  cmpl $0, (%rdx)\n"
-        "  je ef_spin_loop\n"
+        "  jne ef_spin_end\n"
+        "  jmp ef_spin_loop\n"
         ".globl ef_spin_end\n"
         "ef_spin_end:\n"
         "  ret\n");
@@ -277,6 +282,9 @@ static void suspend_case(void)
 
 int main(void)
 {
+    /* each line reaches the log at once, also from a run that hangs */
+    setvbuf(stdout, NULL, _IONBF, 0);
+
     SYSTEM_INFO si;
     GetSystemInfo(&si);
     const SIZE_T page = si.dwPageSize;
