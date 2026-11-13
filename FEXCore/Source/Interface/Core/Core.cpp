@@ -148,7 +148,17 @@ uint64_t ContextImpl::GetGuestBlockEntry(FEXCore::Core::InternalThreadState* Thr
   return InlineTail ? InlineTail->RIP : 0;
 }
 
+void ContextImpl::SyncCurrentBlock(FEXCore::Core::InternalThreadState* Thread, uint64_t HostPC) {
+  // With EntryHeaderLookup the JIT's entry points don't store InlineJITBlockHeader (JIT.cpp, EmitEntryPoint): set it
+  // from the block HostPC lies in, if any. Outside translated code it keeps its last value, which the users check
+  // against HostPC as before.
+  if (const auto Header = Thread->CPUBackend->FindBlockHeader(HostPC)) {
+    Thread->CurrentFrame->State.InlineJITBlockHeader = Header;
+  }
+}
+
 uint64_t ContextImpl::RestoreRIPFromHostPC(FEXCore::Core::InternalThreadState* Thread, uint64_t HostPC) {
+  SyncCurrentBlock(Thread, HostPC);
   const auto Frame = Thread->CurrentFrame;
   const uint64_t BlockBegin = Frame->State.InlineJITBlockHeader;
   auto [InlineHeader, InlineTail] = GetFrameBlockInfo(Thread->CurrentFrame);

@@ -149,6 +149,7 @@ public:
 
   bool IsAddressInCurrentBlock(FEXCore::Core::InternalThreadState* Thread, uint64_t Address, uint64_t Size) override;
   bool IsCurrentBlockSingleInst(FEXCore::Core::InternalThreadState* Thread) override;
+  void SyncCurrentBlock(FEXCore::Core::InternalThreadState* Thread, uint64_t HostPC) override;
   uint64_t GetGuestBlockEntry(FEXCore::Core::InternalThreadState* Thread) override;
 
   uint64_t RestoreRIPFromHostPC(FEXCore::Core::InternalThreadState* Thread, uint64_t HostPC) override;

@@ -29,6 +29,9 @@ using JITCodeTail = FEXCore::CPU::CPUBackend::JITCodeTail;
 // The thread's state: the CPU area's EmulatorData[0] points to a CpuStateFrame, whose first
 // member is CPUState.
 static_assert(offsetof(CpuStateFrame, State) == 0, "jdrly/wine heatprof.h reads CPUState at the frame's start");
+// With FEX_ENTRYHEADERLOOKUP=1 no block entry stores InlineJITBlockHeader: it holds the block of the thread's last
+// fault, suspend or SMC write, not the block it entered last, so a sample can't attribute pc by it. A sampler session
+// runs with the option off (jdrly/gw2-on-mac#162).
 static_assert(offsetof(CPUState, InlineJITBlockHeader) == 0, "jdrly/wine heatprof.h: HEAT_FEX_STATE_BLOCK has to follow");
 static_assert(sizeof(CPUState::InlineJITBlockHeader) == 8, "jdrly/wine heatprof.h reads HEAT_FEX_STATE_BLOCK as 8 bytes");
 static_assert(offsetof(CPUState, rip) == 24, "jdrly/wine heatprof.h: HEAT_FEX_STATE_RIP has to follow");

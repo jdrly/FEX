@@ -815,10 +815,14 @@ void Arm64JITCore::EmitSuspendInterruptCheck() {
 }
 
 void Arm64JITCore::EmitEntryPoint(ARMEmitter::BackwardLabel& HeaderLabel, bool CheckTF) {
-  // Get the address of the JITCodeHeader and store in to the core state.
-  // Two instruction cost, each 1 cycle.
-  adr_OrRestart(TMP1, &HeaderLabel);
-  str(TMP1, STATE, offsetof(FEXCore::Core::CPUState, InlineJITBlockHeader));
+  // With EntryHeaderLookup the paths that read InlineJITBlockHeader find the block from the host PC instead
+  // (CPUBackend::FindBlockHeader, ContextImpl::SyncCurrentBlock), so an entry stores nothing.
+  if (!EntryHeaderLookup) {
+    // Get the address of the JITCodeHeader and store in to the core state.
+    // Two instruction cost, each 1 cycle.
+    adr_OrRestart(TMP1, &HeaderLabel);
+    str(TMP1, STATE, offsetof(FEXCore::Core::CPUState, InlineJITBlockHeader));
+  }
 
   if (CheckTF) {
     EmitTFCheck();
@@ -935,6 +939,12 @@ CPUBackend::CompiledCode Arm64JITCore::EmitJITCode(uint64_t Entry, uint64_t Size
   (void)Bind(&JITCodeHeaderLabel);
   JITCodeHeader* CodeHeader = GetCursorAddress<JITCodeHeader*>();
   CursorIncrement(sizeof(JITCodeHeader));
+  if (EntryHeaderLookup) {
+    // ExitFunctionLink reads the instruction 8 bytes before a branch site to tell a call from a jump. Without the
+    // entry's adr and str, a block whose code starts with its exit branch would have that read land before the
+    // block, outside the code buffer for its first block. A zero word keeps it inside the block.
+    dc32(0);
+  }
 
   auto CodeBegin = GetCursorAddress<uint8_t*>();
 
@@ -1269,6 +1279,11 @@ CPUBackend::CompiledCode Arm64JITCore::EmitJITCode(uint64_t Entry, uint64_t Size
     memcpy(AllocatedInfo.BufferAllocationOffset, TempCodeBuffer, CodeData.Size);
   }
 
+  if (EntryHeaderLookup) {
+    // Before the block can be reached: a fault in it looks it up by host PC
+    CurrentCodeBuffer->RegisterBlock(CodeData.BlockBegin);
+  }
+
   TempCodeBufferAllocator.DelayedDisownBuffer();
 
   ClearICache(CodeBegin, CodeOnlySize);
@@ -1316,6 +1331,9 @@ CPUBackend::CompiledCode Arm64JITCore::LoadCachedCode(std::span<const uint8_t> H
     memcpy(Dest, HostBytes.data(), HostBytes.size());
   }
   ClearICache(Dest, HostBytes.size());
+  if (EntryHeaderLookup) {
+    CurrentCodeBuffer->RegisterBlock(Dest);
+  }
 
   CPUBackend::CompiledCode Result;
   Result.BlockBegin = Dest;

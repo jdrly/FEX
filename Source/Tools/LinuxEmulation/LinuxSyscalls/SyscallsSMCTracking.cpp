@@ -117,6 +117,7 @@ bool SyscallHandler::HandleSegfault(FEXCore::Core::InternalThreadState* Thread, 
     FEXCORE_PROFILE_INSTANT_INCREMENT(Thread, AccumulatedSMCCount, 1);
 
     auto CTX = Thread->CTX;
+    CTX->SyncCurrentBlock(Thread, ArchHelpers::Context::GetPc(ucontext));
     if (CTX->IsAddressInCodeBuffer(Thread, ArchHelpers::Context::GetPc(ucontext)) && !CTX->IsCurrentBlockSingleInst(Thread) &&
         CTX->IsAddressInCurrentBlock(Thread, FaultAddress & FEXCore::Utils::FEX_PAGE_MASK, FEXCore::Utils::FEX_PAGE_SIZE)) {
       // If we are not in a single-instruction block, and the SMC write address could intersect with the current block,
