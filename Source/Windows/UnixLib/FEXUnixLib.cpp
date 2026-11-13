@@ -161,12 +161,14 @@ static inline void* InitializeSHM(uint32_t MapSize, uint32_t MaxSize, uint64_t M
   }
 
 #ifdef __APPLE__
-  // macOS sets the size of a shared memory object only once, so it gets the whole reservation now and AllocateMoreSlots
-  // only maps more of it. Its pages take memory only once touched, and the header's Size still says how much is in use.
+  // macOS sets the size of a shared memory object only once, so it gets the whole reservation now, and all of it is
+  // mapped below, once. Its pages take memory only once touched, and the header's Size still says how much is in use.
   // GW2 on Mac (jdrly/gw2-on-mac#117): before, every thread after the first page's worth had no slot.
+  // jdrly/gw2-on-mac#139: AllocateMoreSlots maps nothing on macOS, see there.
   if (ftruncate(fd, MaxSize) == -1) {
     goto err;
   }
+  MapSize = MaxSize;
 #else
   if (ftruncate(fd, MapSize) == -1) {
     goto err;
@@ -211,6 +213,15 @@ err:
   return Base;
 }
 
+#ifdef __APPLE__
+// GW2 on Mac (jdrly/gw2-on-mac#139): InitializeSHM mapped the whole object, so a growth only raises the header's Size.
+// Mapping it again with MAP_FIXED would replace the pages that hold the slots, from the base on, while other threads
+// count in theirs. A test program's main thread once faulted reading its own slot while its new threads took theirs.
+// That this remap caused it isn't proven, but replacing pages under their readers is wrong either way.
+static inline bool AllocateMoreSlots(void*, uint32_t) {
+  return true;
+}
+#else
 static inline bool AllocateMoreSlots(void* SHMBase, uint32_t NewSize) {
   bool Result {};
   const std::string Name = "fex-" + std::to_string(getpid()) + "-stats";
@@ -221,12 +232,9 @@ static inline bool AllocateMoreSlots(void* SHMBase, uint32_t NewSize) {
     return false;
   }
 
-#ifndef __APPLE__
-  // On macOS the object already has its full size (InitializeSHM)
   if (ftruncate(fd, NewSize) == -1) {
     goto err;
   }
-#endif
 
   {
     auto SharedBase = mmap(SHMBase, NewSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, 0);
@@ -241,6 +249,7 @@ err:
   close(fd);
   return Result;
 }
+#endif
 
 static NTSTATUS FEXUnixLib_GetSHMStatsVMAHandler(void* _Args) {
   auto Args = reinterpret_cast<FEXUnixLib_GetSHMStatsVMA*>(_Args);

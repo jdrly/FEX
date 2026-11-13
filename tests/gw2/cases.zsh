@@ -113,6 +113,31 @@ codebuf codebuf-unset discard mine
 codebuf codebuf-128 keep mine FEX_INITIALCODEBUFFERMB=128 FEX_SILENTLOG=0
 codebuf codebuf-invalid invalid mine FEX_INITIALCODEBUFFERMB=100 FEX_SILENTLOG=0
 
+# The stats object grows while threads count in their slots (jdrly/gw2-on-mac#139). slots.exe
+# (tests/gw2/slots.c) keeps 8 threads counting in their slots while it starts 600 more, so the
+# object grows five times under them. On macOS my FEX maps the whole object once and a growth maps
+# nothing; before, each growth mapped it again over the live slots. One run: a pass can't prove
+# the race gone, so more runs add cost, not proof. It has to pass, give every one of the 608
+# threads a slot, and show native exits in each counting thread's. Under mine only, like the
+# counters cases.
+slots_check() {
+  local label=$1 tid r log=()
+  integer missing=0 quiet=0
+  [[ -f $prefix/$label.log ]] && log=(${(f)"$(tr -d '\r' <"$prefix/$label.log")"})
+  local counting=(${=${(M)log:#gw2 test slots: counting *}#gw2 test slots: counting})
+  local waiting=(${=${(M)log:#gw2 test slots: waiting *}#gw2 test slots: waiting})
+  for tid in $counting $waiting; do
+    (( $(counter "$label.reader.1" "$tid" tso_switches) >= 0 )) || missing+=1
+  done
+  for tid in $counting; do
+    (( $(counter "$label.reader.1" "$tid" native_exits) > 0 )) || quiet+=1
+  done
+  (( ${#counting} == 8 && ${#waiting} == 600 && missing == 0 && quiet == 0 )) && r=ok || r=no
+  verdict $label-slots $r "${#counting} counting and ${#waiting} waiting threads named, $missing without a slot, $quiet counting threads with no exits counted"
+}
+stats slots mine 120 slots.exe 'gw2 test slots: passed' 'thread <->: *'
+if [[ $which == mine ]]; then slots_check slots; fi
+
 # Mach9's smoke test in both modes with the option at 16 and at 128
 for mb in 16 128; do
   check smoke-default-$mb mine 40 fex.exe "$smoke" FEX_INITIALCODEBUFFERMB=$mb
@@ -159,7 +184,8 @@ check smoke-tso-keep-smcchecks-full mine 160 fex.exe "$smoke" FEX_HARDWARETSOSYS
 check smoke-tso-keep-log mine 40 fex.exe "$smoke" FEX_HARDWARETSOSYSCALLS=keep FEX_SILENTLOG=0 WINEDEBUG=
 if [[ $which == mine ]]; then report tso-keep smoke-tso-keep-log '*FEX: Keeping hardware TSO across syscalls*'; fi
 
-# Four threads in a ring of fence-free queues for 60 seconds, a syscall on every pass
+# Four threads in a ring of fence-free queues for 10 seconds, a syscall on every pass. keep moved
+# 150 million items in that time (905 million in 60 s in run 43331549134), switch 3.6 million.
 check tsoqueue-switch mine 150 tsoqueue.exe 'gw2 test tsoqueue: passed' FEX_HARDWARETSOSYSCALLS=switch
 check tsoqueue-keep mine 150 tsoqueue.exe 'gw2 test tsoqueue: passed' FEX_HARDWARETSOSYSCALLS=keep
 
@@ -167,8 +193,10 @@ check tsoqueue-keep mine 150 tsoqueue.exe 'gw2 test tsoqueue: passed' FEX_HARDWA
 # iteration, from <label>.log's thread ids and the last read of <label>.reader.<n>. With hardware
 # TSO: under switch about two per iteration of close and qpc (1.9 to 2.1), under keep fewer than
 # one per 1,000; the native loop fewer than one per 1,000 in both. Without it every count is 0.
-# tso_field is fexstats's name for the count (#117), one per trap.
-tso_field=tso_switches tsocalls_iterations=1000000
+# tso_field is fexstats's name for the count (#117), one per trap. 100,000 iterations a loop: the
+# close loop costs 40 to 70 us an iteration, so a million took 40 s and 70 s in run 43331549134,
+# and a tenth still tells two traps an iteration from fewer than 100 in all.
+tso_field=tso_switches tsocalls_iterations=100000
 tsocalls_traps() {
   [[ $which == mine ]] || return 0
   local label=$1 mode=$2 hw=no keep=no loop line tid traps want ok=1 said=()

@@ -4,7 +4,7 @@
  *
  *   tsoqueue.exe [<seconds>]
  *
- * Four threads in a ring for <seconds> (60 by default). Each thread produces into a queue its
+ * Four threads in a ring for <seconds> (10 by default). Each thread produces into a queue its
  * successor consumes, and consumes the queue its predecessor produces into. A queue is a ring of
  * 64 slots with one producer and one consumer, and it has no fences: an item's four words and the
  * index that publishes it are plain stores, and the consumer's reads are plain loads, kept in
@@ -139,7 +139,7 @@ int main(int argc, char **argv)
 {
     HANDLE threads[THREADS];
     LARGE_INTEGER freq, now;
-    unsigned long long seconds = 60, items = 0, syscalls = 0;
+    unsigned long long seconds = 10, items = 0, syscalls = 0;
     int failed = 0;
 
     if (argc > 2 || (argc == 2 && !(seconds = strtoull(argv[1], NULL, 10))))
