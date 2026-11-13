@@ -30,7 +30,9 @@
  * the test stage asks which FEX ran, the engine's included, after my stats layout has moved on.
  *
  * A change to ThreadStats adds its field to FEX_STATS_FIELDS and raises STATS_VERSION in FEX;
- * GW2ContractStats.h and my Wine fork's heatfex.h follow.
+ * GW2ContractStats.h and my Wine fork's heatfex.h follow. The one exception is l1_hits
+ * (jdrly/gw2-on-mac#161): it took FEX's padding at version 3, so another version-3 FEX prints 0
+ * there (see SHMStats.h).
  */
 #include "Windows/Common/GW2ContractStats.h"
 
@@ -56,6 +58,7 @@
   X(disk_cache_hit, AccumulatedDiskCacheHitCount)           \
   X(disk_cache_miss, AccumulatedDiskCacheMissCount)         \
   X(disk_cache_lookup_time, AccumulatedDiskCacheLookupTime) \
+  X(l1_hits, AccumulatedL1LookupHitCount)                   \
   X(tso_switches, AccumulatedHardwareTSOSwitchCount)        \
   X(native_exits, AccumulatedNativeExitCount)               \
   X(code_buffer_moves, AccumulatedCodeBufferMoveCount)      \
