@@ -186,6 +186,8 @@ if [[ ! -f $prefix/system.reg ]]; then
 fi
 
 rc=0 failed=0
+# how long the case's program ran, readers included, for the result line (what the stage costs)
+integer t0=$SECONDS
 rm -f "$prefix/$label".hang.*(N)
 if [[ -n ${GW2_TEST_READER:-} ]]; then
   flag=$prefix/$label.done reader=$prefix/$label.reader
@@ -237,16 +239,16 @@ else
 fi
 
 if (( rc != 0 )) || ! said "$want"; then
-  print "FAIL  $label (exit $rc$( (( rc == 137 )) && print ', the time limit' ))"
+  print "FAIL  $label (exit $rc$( (( rc == 137 )) && print ', the time limit' )) after $(( SECONDS - t0 )) s"
   samples=("$prefix/$label".hang.<->.log(Nn))
   (( ! ${#samples} )) || print "      where it stood: ${(j:, :)${samples:t}} (the engine-tests artifact)"
   sed 's/^/      /' "$log"
   failed=1
 elif (( failed )); then
-  print "FAIL  $label: a read failed"
+  print "FAIL  $label: a read failed, after $(( SECONDS - t0 )) s"
   sed 's/^/      /' "$prefix/$label".reader.*(N)
 else
-  print "ok    $label"
+  print "ok    $label, $(( SECONDS - t0 )) s"
 fi
 
 stop
