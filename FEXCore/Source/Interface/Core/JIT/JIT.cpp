@@ -939,6 +939,12 @@ CPUBackend::CompiledCode Arm64JITCore::EmitJITCode(uint64_t Entry, uint64_t Size
   (void)Bind(&JITCodeHeaderLabel);
   JITCodeHeader* CodeHeader = GetCursorAddress<JITCodeHeader*>();
   CursorIncrement(sizeof(JITCodeHeader));
+  if (EntryHeaderLookup) {
+    // ExitFunctionLink reads the instruction 8 bytes before a branch site to tell a call from a jump. Without the
+    // entry's adr and str, a block whose code starts with its exit branch would have that read land before the
+    // block, outside the code buffer for its first block. A zero word keeps it inside the block.
+    dc32(0);
+  }
 
   auto CodeBegin = GetCursorAddress<uint8_t*>();
 
