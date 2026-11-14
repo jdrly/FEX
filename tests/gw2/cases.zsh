@@ -389,3 +389,22 @@ stats counters-compilelock mine 300 counters.exe "$counters" "$counted<1->" $all
 if [[ $which == mine ]]; then counters_check counters-compilelock '<1->'; fi
 stats slots-compilelock mine 120 slots.exe 'gw2 test slots: passed' 'thread <->: *' $all
 if [[ $which == mine ]]; then slots_check slots-compilelock; fi
+
+# jdrly/gw2-on-mac#164: FEX_LEA32BITADDS and FEX_SIGNEXTENDINGLOADS change what LEA and MOVSX
+# compile to, each off by default. FEX's own assembly and instruction count tests in the core job
+# cover what they compute. Here both run together with FEX_ENTRYHEADERLOOKUP=1, as a dev build of
+# my app runs them, through the cases the #162 block above runs.
+cuts=(FEX_LEA32BITADDS=1 FEX_SIGNEXTENDINGLOADS=1 $lookup)
+check entryfault-cuts mine 120 entryfault.exe "$entryfault" $cuts
+check entryfault-cuts-smcchecks-full mine 160 entryfault.exe "$entryfault" $cuts FEX_SMCCHECKS=full
+if [[ $which == mine ]]; then crash_check crash-cuts $cuts; fi
+check singlestep-cuts mine 60 singlestep.exe 'gw2 test singlestep: passed' $cuts
+check smoke-default-cuts mine 40 fex.exe "$smoke" $cuts
+check smoke-smcchecks-full-cuts mine 160 fex.exe "$smoke" $cuts FEX_SMCCHECKS=full
+check tsoqueue-keep-cuts mine 150 tsoqueue.exe 'gw2 test tsoqueue: passed' FEX_HARDWARETSOSYSCALLS=keep $cuts
+stats tsocalls-keep-cuts mine 300 tsocalls.exe 'gw2 test tsocalls: passed' 'thread <->: *' \
+  FEX_HARDWARETSOSYSCALLS=keep GW2_TSOCALLS_ITERATIONS=$tsocalls_iterations $cuts
+tsocalls_traps tsocalls-keep-cuts keep
+codebuf codebuf-unset-cuts discard mine $cuts
+stats counters-cuts mine 300 counters.exe "$counters" "$counted<1->" $cuts
+if [[ $which == mine ]]; then counters_check counters-cuts '<1->'; fi
