@@ -59,15 +59,20 @@
 #   push to gw2-on-mac it adds it to the pre-release arm64-builds, the one release this workflow
 #   makes, never marked latest, and keeps the 30 newest.
 # stress: on my word only, a manual run (gh workflow run gw2.yml --repo jdrly/FEX --ref <branch>
-#   [-f fex=<commit>] [-f rounds=<n>]), which runs this job and nothing else
+#   [-f fex=<commit>] [-f rounds=<n>]), which runs the jobs budget and stress and nothing else
 #   (jdrly/gw2-on-mac#132). It builds nothing of FEX: it takes the build of my FEX that a push
 #   published (fex-arm64-<commit>.tar.xz on arm64-builds) or, failing that, the artifact a pull
 #   request's run left (kept 7 days). tests/gw2/stress.zsh starts counters.exe and Mach9's smoke
 #   program under the engine's FEX, under mine and under mine with FEX_ENTRYHEADERLOOKUP=1, with
-#   FEX_DYNAMICL1CACHE unset and at 0, round after round. It starts no run after 5 minutes, and the step ends at 7 whatever runs, so the job
-#   stays under ten. The summary has the table of passes, crashes and hangs; the artifact
-#   stress-<run id> the logs and samples. It stops at once when another run of this workflow is
-#   queued or running: a manual run takes no slot from a build.
+#   FEX_DYNAMICL1CACHE unset and at 0, for <rounds> rounds (5 unless the run says otherwise). Its
+#   time limits come from stress.zsh --budget <rounds>: the seconds after which no run starts are
+#   <rounds> times a round's planned time plus the prefixes, the step gets one longest run and a
+#   minute more, the job 5 minutes more than the step. With 12 combinations and 5 rounds that is
+#   no run after 2010 s, the step at 37 minutes and the job at 42. The summary has the table of
+#   passes, crashes and hangs and which combinations got fewer runs; the artifact stress-<run id>
+#   the logs and samples. The job budget, on Linux, works out the limits and stops the run at once
+#   when another run of this workflow is queued or running: a manual run takes no slot from a
+#   build, and a refused one never takes a macOS runner.
 name: GW2
 
 on:
@@ -82,9 +87,9 @@ on:
         required: false
         default: ""
       rounds:
-        description: "At most this many runs of each program, FEX and FEX_DYNAMICL1CACHE"
+        description: "Runs of each program, FEX and FEX_DYNAMICL1CACHE. The time limits follow"
         required: false
-        default: "10"
+        default: "5"
 
 permissions:
   contents: read
@@ -726,14 +731,62 @@ jobs:
           echo "releases/latest: ${latest:-none}"
           [[ $latest != "$RELEASE" ]]
 
-  # A manual run's only job (jdrly/gw2-on-mac#132), see the top. Not in the builds' group
+  # A manual run's jobs (jdrly/gw2-on-mac#132, #172), see the top. Not in the builds' group
   # gw2-macos-build: GitHub keeps one waiting job per group, so a manual run waiting there could
-  # take the place of a push's build, which then never publishes. It checks for other runs instead.
+  # take the place of a push's build, which then never publishes. budget checks for other runs
+  # instead, and works out stress's time limits, which an expression can't compute.
+  budget:
+    name: Time limits, and no other run
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      step_minutes: ${{ steps.limits.outputs.minutes }}
+      job_minutes: ${{ steps.limits.outputs.job_minutes }}
+    env:
+      ROUNDS: ${{ inputs.rounds }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      # One run at a time in this repository (AGENTS.md). A push that comes while this runs still
+      # runs beside it. stress repeats it: its macOS runner can take a while to come, and a push
+      # can start a run meanwhile.
+      - &no_other_run
+        name: No other run
+        run: |
+          others=$(gh run list --workflow gw2.yml --limit 50 --json databaseId,status \
+            -q "[.[] | select(.databaseId != $GITHUB_RUN_ID and .status != \"completed\")] | map(.databaseId) | join(\" \")")
+          [[ -z $others ]] || { echo "::error::other runs of this workflow are queued or running: $others"; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: tests/gw2/stress.zsh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      # GitHub's Ubuntu image has no zsh
+      - name: zsh
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends zsh
+      # The step's minutes from stress.zsh; the job's other steps took under a minute with the
+      # caches there (run 43471599150), and downloading Mach9 and llvm-mingw adds a little
+      - name: Limits
+        id: limits
+        run: |
+          out=$(tests/gw2/stress.zsh --budget "$ROUNDS")
+          seconds=$(sed -n 's/^seconds=//p' <<<"$out") minutes=$(sed -n 's/^minutes=//p' <<<"$out")
+          job=$(( minutes + 5 ))
+          (( job <= 360 )) || { echo "::error::$ROUNDS rounds need $job minutes, more than the 360 GitHub gives a job"; exit 1; }
+          echo "$ROUNDS rounds: no run starts after $seconds s, the step stops at $minutes minutes, the job at $job" |
+            tee -a "$GITHUB_STEP_SUMMARY"
+          { echo "minutes=$minutes"; echo "job_minutes=$job"; } >>"$GITHUB_OUTPUT"
+
   stress:
     name: Crashes and hangs at process start
-    if: github.event_name == 'workflow_dispatch'
+    needs: budget
     runs-on: *runner
-    timeout-minutes: 12
+    timeout-minutes: ${{ fromJSON(needs.budget.outputs.job_minutes) }}
     permissions:
       contents: read
       actions: read
@@ -744,13 +797,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
-      # One run at a time in this repository (AGENTS.md). A push that comes while this runs still
-      # runs beside it.
-      - name: No other run
-        run: |
-          others=$(gh run list --workflow gw2.yml --limit 50 --json databaseId,status \
-            -q "[.[] | select(.databaseId != $GITHUB_RUN_ID and .status != \"completed\")] | map(.databaseId) | join(\" \")")
-          [[ -z $others ]] || { echo "::error::other runs of this workflow are queued or running: $others"; exit 1; }
+      - *no_other_run
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
@@ -826,16 +873,24 @@ jobs:
           install -m 755 "$RUNNER_TEMP/fex/aarch64-unix/libarm64ecfex.so" "$w/aarch64-unix/libarm64ecfex.so"
           xattr -drs com.apple.quarantine "$e" "$m"
       - name: Run them
-        timeout-minutes: 7
+        id: run
+        timeout-minutes: ${{ fromJSON(needs.budget.outputs.step_minutes) }}
         run: |
           src/tests/gw2/stress.zsh "$RUNNER_TEMP/engine-own/wine" "$RUNNER_TEMP/engine-mine/wine" "$RUNNER_TEMP/tests" \
-            "$RUNNER_TEMP/stress" "$ROUNDS" 300 "$RUNNER_TEMP/stress.md"
-      # also after the step's time limit: the table as far as it got
+            "$RUNNER_TEMP/stress" "$ROUNDS" "$RUNNER_TEMP/stress.md"
+      # also after the step's time limit: the table as far as it got. The limit leaves room for one
+      # run killed at its own limit, not for a prefix boot that takes run.zsh's 600 s.
       - name: The table
         if: always()
+        env:
+          OUTCOME: ${{ steps.run.outcome }}
+          MINUTES: ${{ needs.budget.outputs.step_minutes }}
         run: |
           if [[ -f $RUNNER_TEMP/stress.md ]]; then
             tee -a "$GITHUB_STEP_SUMMARY" <"$RUNNER_TEMP/stress.md"
+            [[ $OUTCOME == success ]] ||
+              printf '\nstress.zsh did not finish: Run them ended in %s, at a limit of %s minutes. The table is where it stopped.\n' \
+                "$OUTCOME" "$MINUTES" | tee -a "$GITHUB_STEP_SUMMARY"
           else
             echo "no table: stress.zsh didn't start"
           fi
