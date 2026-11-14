@@ -104,9 +104,14 @@ report() {
     else
       print "No run failed."
     fi
+    # in every report, so a step stopped at its time limit still leaves the list
     if (( finished && ${#short} )); then
       print "\nFewer than $rounds runs, as the budget ran out in round $round: the runs took longer" \
         "than planned (see hung and seconds a run).\n"
+    elif (( ${#short} )); then
+      print "\nFewer than $rounds runs so far, in round $round:\n"
+    fi
+    if (( ${#short} )); then
       for c in $short; do
         program=${c%%:*} which=${${c#*:}%%:*} l1=${c##*:}
         print -r -- "- $program, $names[$which], FEX_DYNAMICL1CACHE $l1: $runs[$c]"

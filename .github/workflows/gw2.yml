@@ -752,8 +752,10 @@ jobs:
       GH_REPO: ${{ github.repository }}
     steps:
       # One run at a time in this repository (AGENTS.md). A push that comes while this runs still
-      # runs beside it.
-      - name: No other run
+      # runs beside it. stress repeats it: its macOS runner can take a while to come, and a push
+      # can start a run meanwhile.
+      - &no_other_run
+        name: No other run
         run: |
           others=$(gh run list --workflow gw2.yml --limit 50 --json databaseId,status \
             -q "[.[] | select(.databaseId != $GITHUB_RUN_ID and .status != \"completed\")] | map(.databaseId) | join(\" \")")
@@ -795,6 +797,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
+      - *no_other_run
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
@@ -870,16 +873,24 @@ jobs:
           install -m 755 "$RUNNER_TEMP/fex/aarch64-unix/libarm64ecfex.so" "$w/aarch64-unix/libarm64ecfex.so"
           xattr -drs com.apple.quarantine "$e" "$m"
       - name: Run them
+        id: run
         timeout-minutes: ${{ fromJSON(needs.budget.outputs.step_minutes) }}
         run: |
           src/tests/gw2/stress.zsh "$RUNNER_TEMP/engine-own/wine" "$RUNNER_TEMP/engine-mine/wine" "$RUNNER_TEMP/tests" \
             "$RUNNER_TEMP/stress" "$ROUNDS" "$RUNNER_TEMP/stress.md"
-      # also after the step's time limit: the table as far as it got
+      # also after the step's time limit: the table as far as it got. The limit leaves room for one
+      # run killed at its own limit, not for a prefix boot that takes run.zsh's 600 s.
       - name: The table
         if: always()
+        env:
+          OUTCOME: ${{ steps.run.outcome }}
+          MINUTES: ${{ needs.budget.outputs.step_minutes }}
         run: |
           if [[ -f $RUNNER_TEMP/stress.md ]]; then
             tee -a "$GITHUB_STEP_SUMMARY" <"$RUNNER_TEMP/stress.md"
+            [[ $OUTCOME == success ]] ||
+              printf '\nstress.zsh did not finish: Run them ended in %s, at a limit of %s minutes. The table is where it stopped.\n' \
+                "$OUTCOME" "$MINUTES" | tee -a "$GITHUB_STEP_SUMMARY"
           else
             echo "no table: stress.zsh didn't start"
           fi
