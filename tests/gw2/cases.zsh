@@ -408,3 +408,21 @@ tsocalls_traps tsocalls-keep-cuts keep
 codebuf codebuf-unset-cuts discard mine $cuts
 stats counters-cuts mine 300 counters.exe "$counters" "$counted<1->" $cuts
 if [[ $which == mine ]]; then counters_check counters-cuts '<1->'; fi
+
+# jdrly/gw2-on-mac#118: FEX_HOSTFEATURES=disableavx hides AVX from an ARM64EC process. avx.exe
+# (tests/gw2/avx.c) asks every way a program can (CPUID, XGETBV, IsProcessorFeaturePresent,
+# SystemCpuInformation, the shared data page, GetEnabledXStateFeatures) and runs a small kernel on
+# its SSE2 path and, where it sees AVX2, on its AVX2 path. GW2_AVX_EXPECT says which answers it
+# wants. Without the option AVX is seen under both FEXes; the engine's FEX ignores the option, so
+# hidden runs under mine only. Both again with the two lookups my dev builds run with. Then Mach9's
+# smoke test with the option, in both modes and with the lookups.
+avx='gw2 test avx: passed'
+noavx=FEX_HOSTFEATURES=disableavx
+devlookups=(FEX_ENTRYHEADERLOOKUP=1 FEX_DISPATCHERL1LOOKUP=1)
+check avx-seen both 60 avx.exe "$avx" GW2_AVX_EXPECT=seen
+check avx-hidden mine 60 avx.exe "$avx" GW2_AVX_EXPECT=hidden $noavx
+check avx-seen-lookups mine 60 avx.exe "$avx" GW2_AVX_EXPECT=seen $devlookups
+check avx-hidden-lookups mine 60 avx.exe "$avx" GW2_AVX_EXPECT=hidden $noavx $devlookups
+check smoke-noavx mine 40 fex.exe "$smoke" $noavx
+check smoke-noavx-smcchecks-full mine 160 fex.exe "$smoke" $noavx FEX_SMCCHECKS=full
+check smoke-noavx-lookups mine 40 fex.exe "$smoke" $noavx $devlookups

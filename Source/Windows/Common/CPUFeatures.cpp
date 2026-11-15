@@ -93,8 +93,15 @@ FEXCore::HostFeatures CPUFeatures::FetchHostFeatures(bool IsWine, FEXCore::HostF
 
   HostFeatures.ProcessPID = ProcessPID;
 
-  // AVX is unsupported for WOW64
-  HostFeatures.SupportsAVX = HostType == FEXCore::HostFeatures::HostTypeEnum::Arm64ec;
+  // AVX is unsupported for WOW64. ARM64EC keeps it unless FEX_HOSTFEATURES has disableavx, which FetchHostFeatures
+  // applied above. Hidden there, it takes VAES with it: VAES is VEX-coded, and FEX doesn't decode VEX without AVX.
+  if (HostType == FEXCore::HostFeatures::HostTypeEnum::Arm64ec) {
+    if (!HostFeatures.SupportsAVX) {
+      HostFeatures.SupportsAES256 = false;
+    }
+  } else {
+    HostFeatures.SupportsAVX = false;
+  }
 
   HostFeatures.ProcessFeatures.HostType = HostType;
   HostFeatures.ProcessFeatures.Is64BitMode = HostType == FEXCore::HostFeatures::HostTypeEnum::Arm64ec;
