@@ -814,6 +814,16 @@
           "Faults, suspends, self-modifying code and the unaligned atomic handler find the block from the host PC instead.",
           "Has no effect while EnableCodeCachingWIP is on."
         ]
+      },
+      "EntryCompileLock": {
+        "Type": "bool",
+        "Default": "false",
+        "AffectsCodeGen": "false",
+        "Desc": [
+          "Threads that miss on the same guest entry at the same time compile it once: the first compiles, the others wait and find its block.",
+          "The lock is one of 1024, picked by a hash of the RIP. Generated code doesn't change.",
+          "On Windows on arm64 it also makes FEX's pool allocators read CNTVCT_EL0 for their clock instead of QueryPerformanceCounter."
+        ]
       }
     }
   },

@@ -340,3 +340,52 @@ codebuf codebuf-unset-lookup discard mine $lookup
 codebuf codebuf-128-lookup keep mine FEX_INITIALCODEBUFFERMB=128 FEX_SILENTLOG=0 $lookup
 stats counters-lookup mine 300 counters.exe "$counters" "$counted<1->" $lookup
 if [[ $which == mine ]]; then counters_check counters-lookup '<1->'; fi
+
+# jdrly/gw2-on-mac#165: FEX_ENTRYCOMPILELOCK, one compile per entry when threads miss on it
+# together. compilelock.exe (tests/gw2/compilelock.c) has 8 workers call the same 63 fresh
+# functions at the same time, each function a block of 391 instructions. Between its two reads the
+# workers' jit_count is the compiles of those functions: off, about one per worker that missed
+# together, so it has to be at least one and a half times 63; on, 63, plus at most one a worker for
+# anything I didn't foresee. On also with FEX_ENTRYHEADERLOOKUP=1 and FEX_DISPATCHERL1LOOKUP=1.
+# Then, with all three on, what could hang on the new lock: Mach9's smoke test in both modes,
+# entryfault (faults, suspends and writes into running code, which invalidate), the crash, counters
+# (200 threads starting) and slots (608). Under mine only: the engine's FEX doesn't know the switch,
+# and the cases read the stats slots.
+compilelock_check() {
+  local label=$1 mode=$2 tid d r functions log=()
+  integer sum=0 missing=0
+  [[ -f $prefix/$label.log ]] && log=(${(f)"$(tr -d '\r' <"$prefix/$label.log")"})
+  local workers=(${=${(M)log:#gw2 test compilelock: workers *}#gw2 test compilelock: workers})
+  functions=${${(M)log:#gw2 test compilelock: functions *}##* }
+  [[ $functions == <-> ]] || functions=0
+  for tid in $workers; do
+    d=$(delta $label 1 2 "$tid" jit_count)
+    if (( d >= 0 )); then sum+=d; else missing+=1; fi
+  done
+  if (( ${#workers} != 8 || missing || functions != 63 )); then
+    verdict $label-compiles no "${#workers} workers named, $missing without jit_count in both reads, $functions functions"
+  elif [[ $mode == off ]]; then
+    (( 2 * sum >= 3 * functions )) && r=ok || r=no
+    verdict $label-compiles $r "$sum compiles of $functions functions in 8 workers, wanted at least $(( (3 * functions + 1) / 2 ))"
+  else
+    (( sum >= functions && sum <= functions + 8 )) && r=ok || r=no
+    verdict $label-compiles $r "$sum compiles of $functions functions in 8 workers, wanted $functions to $(( functions + 8 ))"
+  fi
+}
+compilelock='gw2 test compilelock: passed' compiled='thread <->: *jit_count=<->*'
+lock=FEX_ENTRYCOMPILELOCK=1
+all=($lock FEX_ENTRYHEADERLOOKUP=1 FEX_DISPATCHERL1LOOKUP=1)
+stats compilelock-off mine 120 compilelock.exe "$compilelock" "$compiled" FEX_ENTRYCOMPILELOCK=0
+if [[ $which == mine ]]; then compilelock_check compilelock-off off; fi
+stats compilelock-on mine 120 compilelock.exe "$compilelock" "$compiled" $lock
+if [[ $which == mine ]]; then compilelock_check compilelock-on on; fi
+stats compilelock-all mine 120 compilelock.exe "$compilelock" "$compiled" $all
+if [[ $which == mine ]]; then compilelock_check compilelock-all on; fi
+check smoke-default-compilelock mine 40 fex.exe "$smoke" $all
+check smoke-smcchecks-full-compilelock mine 160 fex.exe "$smoke" $all FEX_SMCCHECKS=full
+check entryfault-compilelock mine 120 entryfault.exe "$entryfault" $all
+if [[ $which == mine ]]; then crash_check crash-compilelock $all; fi
+stats counters-compilelock mine 300 counters.exe "$counters" "$counted<1->" $all
+if [[ $which == mine ]]; then counters_check counters-compilelock '<1->'; fi
+stats slots-compilelock mine 120 slots.exe 'gw2 test slots: passed' 'thread <->: *' $all
+if [[ $which == mine ]]; then slots_check slots-compilelock; fi
