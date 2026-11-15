@@ -824,6 +824,24 @@
           "The lock is one of 1024, picked by a hash of the RIP. Generated code doesn't change.",
           "On Windows on arm64 it also makes FEX's pool allocators read CNTVCT_EL0 for their clock instead of QueryPerformanceCounter."
         ]
+      },
+      "Lea32BitAdds": {
+        "Type": "bool",
+        "Default": "false",
+        "AffectsCodeGen": "true",
+        "Desc": [
+          "In 64-bit mode, LEA with a 32-bit destination computes the address with 32-bit adds,",
+          "whose result is already zero-extended, instead of 64-bit adds and a 32-bit move."
+        ]
+      },
+      "SignExtendingLoads": {
+        "Type": "bool",
+        "Default": "false",
+        "AffectsCodeGen": "true",
+        "Desc": [
+          "MOVSX and MOVSXD from memory load and sign-extend in one ldrsb, ldrsh or ldrsw",
+          "when the load needs no TSO emulation, as with hardware TSO."
+        ]
       }
     }
   },

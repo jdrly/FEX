@@ -385,6 +385,8 @@ public:
     FEX_CONFIG_OPT(MonoHacks, MONOHACKS);
     FEX_CONFIG_OPT(JITFeatures, JITFEATURES);
     FEX_CONFIG_OPT(EntryCompileLock, ENTRYCOMPILELOCK);
+    FEX_CONFIG_OPT(Lea32BitAdds, LEA32BITADDS);
+    FEX_CONFIG_OPT(SignExtendingLoads, SIGNEXTENDINGLOADS);
   } Config;
 
   bool SoftwareRNGEnabled() const {
