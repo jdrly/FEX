@@ -388,6 +388,7 @@ public:
     FEX_CONFIG_OPT(Lea32BitAdds, LEA32BITADDS);
     FEX_CONFIG_OPT(SignExtendingLoads, SIGNEXTENDINGLOADS);
     FEX_CONFIG_OPT(TrapFlagIndirectBranches, TRAPFLAGINDIRECTBRANCHES);
+    FEX_CONFIG_OPT(CondBackEdgeSuspend, CONDBACKEDGESUSPEND);
   } Config;
 
   bool SoftwareRNGEnabled() const {

@@ -51,7 +51,8 @@
 #   (jdrly/gw2-on-mac#162), and a block's entry, as CodeSizeValidation measures it, has to be two
 #   instructions shorter with it. The assembly tests run once more with that and #164's two
 #   switches on (FEX_LEA32BITADDS, FEX_SIGNEXTENDINGLOADS), as a dev build of my app runs them.
-#   The failures are compared with tests/gw2/core-failures.txt, the
+#   FEX_CONDBACKEDGESUSPEND (#169) changes only what the JIT emits on Windows: on Linux the code is
+#   the same with it on and off, so the core job doesn't run with it. The failures are compared with tests/gw2/core-failures.txt, the
 #   engine's commit's, whose lines count for the runs with the options too: a test that isn't on
 #   that list may not fail; one on it that passes now is reported.
 # Since 2026-11-12 it runs on GitHub's Xcode 27 image: macos-26 runners weren't being assigned, and I
