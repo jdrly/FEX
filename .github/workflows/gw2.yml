@@ -27,7 +27,8 @@
 #   The function listing after a failed DLL gate only names what differs; it is not the gate.
 #   Artifact fex-arm64-<commit>: aarch64-windows/ and aarch64-unix/ as the engine has them,
 #   VERSION, LICENSE and NOTICES, kept 7 days. VERSION's line "switches: …" names every FEX_*
-#   option this commit adds to Config.json.in over the base.
+#   option this commit adds to Config.json.in over the base, then each value of one of upstream's
+#   options that works only in my fork (FEX_HOSTFEATURES=disableavx, jdrly/gw2-on-mac#118).
 #   Then, in the same job (so it stays one macOS job at a time), the test stage on the engine:
 #   the release tarball unpacked twice, once as it is and once with my libarm64ecfex.dll (also as
 #   xtajit64.dll) and libarm64ecfex.so, and tests/gw2/engine.zsh runs every case of
@@ -392,7 +393,9 @@ jobs:
           cp -R "$RUNNER_TEMP/head/aarch64-windows" "$RUNNER_TEMP/head/aarch64-unix" "$dist/"
           cp "$SRC/LICENSE" "$dist/LICENSE"
           echo "notices for: $(RECORD=$RUNNER_TEMP/head-record "$GW2/fex.zsh" notices "$dist/NOTICES")"
-          # "switches: …": the FEX_* options this commit's Config.json.in has and the base's hasn't
+          # "switches: …": the FEX_* options this commit's Config.json.in has and the base's hasn't,
+          # then the values of upstream's options that only my fork honours. The engine's FEX turns
+          # AVX back on after FEX_HOSTFEATURES (jdrly/gw2-on-mac#118).
           switches=$(python3 -I -c '
           import json, subprocess, sys
           src, base = sys.argv[1:]
@@ -400,7 +403,7 @@ jobs:
           names = lambda d: {"FEX_" + n.upper() for group in d["Options"].values() for n in group}
           head = json.load(open(f"{src}/{path}"))
           old = json.loads(subprocess.run(["git", "-C", src, "show", f"{base}:{path}"], check=True, capture_output=True).stdout)
-          print(" ".join(sorted(names(head) - names(old))))' "$SRC" "$BASE_COMMIT")
+          print(" ".join(sorted(names(head) - names(old)) + ["FEX_HOSTFEATURES=disableavx"]))' "$SRC" "$BASE_COMMIT")
           format=$(sed -n 's/^ *static constexpr uint16_t FormatVersion = \([0-9]*\);$/\1/p' "$SRC/FEXCore/Source/Interface/Core/DiskCache.h")
           [[ -n $format ]] || { echo "::error::no FormatVersion in DiskCache.h"; exit 1; }
           {
