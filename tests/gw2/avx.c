@@ -12,10 +12,11 @@
  * checked against plain C. The SSE2 path always runs. The AVX2 path runs only when CPUID, XGETBV
  * and IsProcessorFeaturePresent all say AVX2, the way a game picks it, and has to run when seen.
  * Prints each answer on a line of its own and "gw2 test avx: passed" when all of it held. */
-#include "gw2test.h"
-
 #include <immintrin.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <windows.h>
 
 #define N 4096
 
