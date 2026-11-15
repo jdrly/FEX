@@ -387,6 +387,7 @@ public:
     FEX_CONFIG_OPT(EntryCompileLock, ENTRYCOMPILELOCK);
     FEX_CONFIG_OPT(Lea32BitAdds, LEA32BITADDS);
     FEX_CONFIG_OPT(SignExtendingLoads, SIGNEXTENDINGLOADS);
+    FEX_CONFIG_OPT(TrapFlagIndirectBranches, TRAPFLAGINDIRECTBRANCHES);
   } Config;
 
   bool SoftwareRNGEnabled() const {

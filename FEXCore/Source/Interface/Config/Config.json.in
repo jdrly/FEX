@@ -842,6 +842,16 @@
           "MOVSX and MOVSXD from memory load and sign-extend in one ldrsb, ldrsh or ldrsw",
           "when the load needs no TSO emulation, as with hardware TSO."
         ]
+      },
+      "TrapFlagIndirectBranches": {
+        "Type": "bool",
+        "Default": "false",
+        "AffectsCodeGen": "true",
+        "Desc": [
+          "While TF is set, a return, indirect jump or indirect call goes through the dispatcher, which raises the single step at its target.",
+          "Without it, one that the call-return stack or L1 answers can jump into a block compiled without TF checks.",
+          "Then the step at the target is lost, and the program runs on with TF set until it next enters the dispatcher."
+        ]
       }
     }
   },
