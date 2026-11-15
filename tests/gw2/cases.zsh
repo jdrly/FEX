@@ -426,3 +426,13 @@ check avx-hidden-lookups mine 60 avx.exe "$avx" GW2_AVX_EXPECT=hidden $noavx $de
 check smoke-noavx mine 40 fex.exe "$smoke" $noavx
 check smoke-noavx-smcchecks-full mine 160 fex.exe "$smoke" $noavx FEX_SMCCHECKS=full
 check smoke-noavx-lookups mine 40 fex.exe "$smoke" $noavx $devlookups
+
+# jdrly/gw2-on-mac#168: FEX_TRAPFLAGINDIRECTBRANCHES, under which a return, indirect jump or
+# indirect call in a block that checks TF goes through the dispatcher. Without it, singlestep.exe's
+# rounds 2 and 3 can return from step_target through L1 into step_after's block, which the
+# dispatcher compiled without TF checks after round 1 cleared TF: no trap at step_after, so TF
+# stays set into main. With it, every round has to trap at step_after and nothing outside step_run
+# may step. Under mine only, alone and with the two lookups my dev builds run with.
+stepped='gw2 test singlestep: every round trapped at step_after, no stray steps'
+check singlestep-trapflag mine 60 singlestep.exe "$stepped" FEX_TRAPFLAGINDIRECTBRANCHES=1
+check singlestep-trapflag-lookups mine 60 singlestep.exe "$stepped" FEX_TRAPFLAGINDIRECTBRANCHES=1 $devlookups
