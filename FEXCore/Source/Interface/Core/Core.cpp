@@ -104,6 +104,11 @@ ContextImpl::ContextImpl(const FEXCore::HostFeatures& Features)
     }
   }
 
+#if defined(_WIN32) && defined(ARCHITECTURE_arm64)
+  // GW2 on Mac (jdrly/gw2-on-mac#165): the pool allocators' clock, see CounterClock. Set here, before any thread compiles.
+  FEXCore::Utils::IntrusivePooledAllocator::CounterClock::Counter.store(Config.EntryCompileLock(), std::memory_order_relaxed);
+#endif
+
   // Track atomic TSO emulation configuration. This must be final before the disk cache is initialized below.
   SupportsHardwareTSO = Features.SupportsHardwareTSO;
   UpdateAtomicTSOEmulationConfig();
@@ -1113,6 +1118,20 @@ ContextImpl::TryCompileBlock(FEXCore::Core::InternalThreadState* Thread, uint64_
   // The backends only check L1 and L2, not L3
   if (auto HostCode = Thread->LookupCache->FindBlock(Thread, GuestRIP)) {
     return HostCode;
+  }
+
+  // GW2 on Mac (jdrly/gw2-on-mac#165), EntryCompileLock: threads running the same code miss on the same entry at the same
+  // time, and each would compile its own copy into the shared code buffer. Take turns per entry, and look again once it's
+  // this thread's turn. It is taken inside the invalidation guard above and dropped before it, so whatever takes
+  // CodeInvalidationMutex exclusively (an invalidation, a fork) never runs while one is held. From FEX-Emu/FEX pull
+  // request 6081:
+  // https://github.com/FEX-Emu/FEX/commit/61663da5bc8391130e4d3fdf0797f0ff9fe44161
+  std::unique_lock<FEXCore::Utils::WritePriorityMutex::Mutex> EntryCompileLock;
+  if (Config.EntryCompileLock()) {
+    EntryCompileLock = std::unique_lock {EntryCompileLocks[(GuestRIP ^ (GuestRIP >> 10) ^ (GuestRIP >> 20)) % EntryCompileLocks.size()]};
+    if (auto HostCode = Thread->LookupCache->FindBlock(Thread, GuestRIP)) {
+      return HostCode;
+    }
   }
 
   Thread->FrontendDecoder->SetupDecodeInstructionsAtEntry(Thread, GuestRIP, MaxInst);
