@@ -852,6 +852,15 @@
           "Without it, one that the call-return stack or L1 answers can jump into a block compiled without TF checks.",
           "Then the step at the target is lost, and the program runs on with TF set until it next enters the dispatcher."
         ]
+      },
+      "CondBackEdgeSuspend": {
+        "Type": "bool",
+        "Default": "false",
+        "AffectsCodeGen": "true",
+        "Desc": [
+          "Windows only: a conditional branch back to an earlier guest instruction checks the suspend doorbell when taken,",
+          "so a thread spinning in a loop closed by one can be suspended. A suspend there resumes at the loop's head."
+        ]
       }
     }
   },

@@ -436,3 +436,25 @@ check smoke-noavx-lookups mine 40 fex.exe "$smoke" $noavx $devlookups
 stepped='gw2 test singlestep: every round trapped at step_after, no stray steps'
 check singlestep-trapflag mine 60 singlestep.exe "$stepped" FEX_TRAPFLAGINDIRECTBRANCHES=1
 check singlestep-trapflag-lookups mine 60 singlestep.exe "$stepped" FEX_TRAPFLAGINDIRECTBRANCHES=1 $devlookups
+
+# jdrly/gw2-on-mac#169: FEX_CONDBACKEDGESUSPEND, a suspend check on the taken side of a conditional
+# branch back to an earlier instruction. condloop.exe (tests/gw2/condloop.c) spins a thread in loops
+# closed by je and jp back. Without the switch, under both FEXes, its je loop isn't suspended within
+# 2 seconds, and the pending suspend takes the thread once a stop flag lets it out. With it, under
+# mine, each loop is suspended at its head, the je loop 1,000 times. Then with it and every other
+# switch of mine on, as a dev build of my app runs them: condloop, entryfault (its fault loop closes
+# with jb back), the crash, single steps (every round trapping at step_after, as #168 wants with its
+# switch) and Mach9's smoke test in both modes.
+condloop='gw2 test condloop: passed'
+backedge=FEX_CONDBACKEDGESUSPEND=1
+dev=($backedge $all FEX_LEA32BITADDS=1 FEX_SIGNEXTENDINGLOADS=1 FEX_TRAPFLAGINDIRECTBRANCHES=1)
+check condloop-off both 60 condloop.exe "$condloop" GW2_CONDLOOP_EXPECT=hang
+check condloop-on mine 120 condloop.exe "$condloop" GW2_CONDLOOP_EXPECT=suspend $backedge
+check condloop-dev mine 120 condloop.exe "$condloop" GW2_CONDLOOP_EXPECT=suspend $dev
+check entryfault-backedge mine 120 entryfault.exe "$entryfault" $backedge
+check entryfault-dev mine 120 entryfault.exe "$entryfault" $dev
+check entryfault-dev-smcchecks-full mine 160 entryfault.exe "$entryfault" $dev FEX_SMCCHECKS=full
+if [[ $which == mine ]]; then crash_check crash-dev $dev; fi
+check singlestep-dev mine 60 singlestep.exe "$stepped" $dev
+check smoke-default-dev mine 40 fex.exe "$smoke" $dev
+check smoke-smcchecks-full-dev mine 160 fex.exe "$smoke" $dev FEX_SMCCHECKS=full
