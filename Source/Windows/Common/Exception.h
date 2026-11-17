@@ -5,7 +5,10 @@
 #include <windef.h>
 #include <winternl.h>
 
+#include <FEXCore/Core/Context.h>
+#include <FEXCore/Utils/ArchHelpers/Arm64.h>
 #include <FEXCore/Utils/LogManager.h>
+#include <FEXCore/Utils/TypeDefines.h>
 #include <FEXCore/Debug/InternalThreadState.h>
 
 #include "InvalidationTracker.h"
@@ -86,6 +89,30 @@ static inline bool IsSegmentLoad(TMutex& ThreadCreationMutex, TReg Rip) {
   case 0x0f: return Code[1] == 0xa1 || Code[1] == 0xa9; // POP FS, POP GS
   default: return false;
   }
+}
+
+// A compile reads guest code with FaultSafeCopy, and another process can take the page away meanwhile: it doesn't wait
+// for the code invalidation mutex the compile holds shared. An access violation there ends the copy, and the compile
+// stops at the byte as at one it can't fetch, see Decoder::FetchInstBytes. A read that used up a guard reads again, as
+// the guard is gone, so the guest never gets that guard's exception. Runs before anything else that handles an exception,
+// as the compile holds the code invalidation mutex shared, which ThreadCreationMutex comes before. It takes only
+// IntervalsLock, which a caller of FaultSafeCopy must not hold. Returns true if the thread continues at Pc.
+static inline bool HandleFaultSafeCopyFault(InvalidationTracker* Tracker, const EXCEPTION_RECORD& Rec, uint64_t& Pc) {
+  const auto ResumePc = FEXCore::ArchHelpers::Arm64::FaultSafeCopyResumePC(Pc);
+  if (!ResumePc) {
+    return false;
+  }
+  if (Rec.ExceptionCode == STATUS_GUARD_PAGE_VIOLATION) {
+    return true;
+  }
+  if (Rec.ExceptionCode != EXCEPTION_ACCESS_VIOLATION || Rec.NumberParameters < 2) {
+    return false;
+  }
+  if (Tracker) {
+    Tracker->HandleCompileReadFault(static_cast<uint64_t>(Rec.ExceptionInformation[1]));
+  }
+  Pc = ResumePc;
+  return true;
 }
 
 // Whether an access violation can be one of FEX's own faults. The call-ret stack, the lookup cache, the JIT guard page and
@@ -184,6 +211,20 @@ static inline EXCEPTION_RECORD HandleGuestException(TMutex& ThreadCreationMutex,
   // Default to SIGILL
   Dst.ExceptionCode = EXCEPTION_ILLEGAL_INSTRUCTION;
   return Dst;
+}
+
+// With full SMC checks, compiled code reads an instruction's bytes before it runs it. A fault in that read, Rec of the
+// access at HostPc, is the one the instruction's fetch takes on hardware, at its RIP Rip: [0] says execute, and [1] is
+// the first byte that can't be fetched, the instruction's or the faulting page's first. A guard that read used up was
+// the fetch's. Called before ApplyFetchFault, which then raises the fault or runs the instruction again.
+static inline void ApplyCodeValidationFault(FEXCore::Context::Context& CTX, FEXCore::Core::InternalThreadState* Thread,
+                                            EXCEPTION_RECORD& Rec, uint64_t HostPc, uint64_t Rip) {
+  if ((Rec.ExceptionCode != EXCEPTION_ACCESS_VIOLATION && Rec.ExceptionCode != STATUS_GUARD_PAGE_VIOLATION) ||
+      Rec.NumberParameters != 2 || Rec.ExceptionInformation[0] != EXCEPTION_READ_FAULT || !CTX.IsCodeValidationRead(Thread, HostPc)) {
+    return;
+  }
+  Rec.ExceptionInformation[0] = EXCEPTION_EXECUTE_FAULT;
+  Rec.ExceptionInformation[1] = std::max<uint64_t>(Rec.ExceptionInformation[1] & FEXCore::Utils::FEX_PAGE_MASK, Rip);
 }
 
 // The decoder stays out of guard pages, so executing one ends in the execute fault of a block that stopped there. Passes

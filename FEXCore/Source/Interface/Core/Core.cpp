@@ -33,6 +33,7 @@ $end_info$
 #include "Utils/crc32.h"
 #include <FEXCore/Utils/SpinWaitLock.h>
 #include "Utils/variable_length_integer.h"
+#include "Common/SoftFloat.h"
 
 #include <FEXCore/Config/Config.h>
 #include <FEXCore/Core/Context.h>
@@ -44,6 +45,7 @@ $end_info$
 #include <FEXCore/HLE/SyscallHandler.h>
 #include <FEXCore/HLE/SourcecodeResolver.h>
 #include <FEXCore/Utils/Allocator.h>
+#include <FEXCore/Utils/ArchHelpers/Arm64.h>
 #include <FEXCore/Utils/Event.h>
 #include <FEXCore/Utils/File.h>
 #include <FEXCore/Utils/LogManager.h>
@@ -199,6 +201,195 @@ uint64_t ContextImpl::RestoreRIPFromHostPC(FEXCore::Core::InternalThreadState* T
 
   // Fallback to what is stored in the RIP currently.
   return Frame->State.rip;
+}
+
+bool ContextImpl::IsCodeValidationRead(FEXCore::Core::InternalThreadState* Thread, uint64_t HostPC) const {
+  if (!IsAddressInCodeBuffer(Thread, HostPC)) {
+    return false;
+  }
+
+  // ValidateCode loads each part of the code into TMP3 with a post-indexed LDR, LDRH or LDRB from TMP2 and adds it to
+  // the CRC in TMP1 with a CRC32B, H, W or X right after. Nothing else in the JIT emits these CRC32s: the guest's CRC32
+  // is CRC32C, see DEF_OP(ValidateCode) and DEF_OP(CRC32).
+  const auto* Code = reinterpret_cast<const uint32_t*>(HostPC);
+  const uint32_t Load = Code[0];
+  const uint32_t CRC = Code[1];
+  constexpr uint32_t LoadPostIndexMask = 0x3fe00c00, LoadPostIndex = 0x38400400;
+  constexpr uint32_t CRC32Mask = 0x7fe0f000, CRC32 = 0x1ac04000;
+  const auto Rt = [](uint32_t Inst) {
+    return Inst & 0x1f;
+  };
+  const auto Rd = Rt;
+  const auto Rn = [](uint32_t Inst) {
+    return (Inst >> 5) & 0x1f;
+  };
+  const auto Rm = [](uint32_t Inst) {
+    return (Inst >> 16) & 0x1f;
+  };
+  return (Load & LoadPostIndexMask) == LoadPostIndex && Rt(Load) == CPU::TMP3.Idx() && Rn(Load) == CPU::TMP2.Idx() &&
+         (CRC & CRC32Mask) == CRC32 && Rm(CRC) == CPU::TMP3.Idx() && Rd(CRC) == CPU::TMP1.Idx();
+}
+
+void ContextImpl::ReconstructX87State(FEXCore::Core::InternalThreadState* Thread, uint64_t HostPC, const __uint128_t* HostVRegs, uint64_t HostSP) {
+  const auto Frame = Thread->CurrentFrame;
+  const uint64_t BlockBegin = Frame->State.InlineJITBlockHeader;
+  auto [InlineHeader, InlineTail] = GetFrameBlockInfo(Frame);
+  if (!InlineHeader || !InlineTail->HasX87StackMap || HostPC < BlockBegin || HostPC >= BlockBegin + InlineTail->Size) {
+    return;
+  }
+
+  // The X87StackMap entries follow the RIP entries, see JITCodeTail. Every
+  // read stays inside the block, and a tail that ends early or holds values
+  // out of range leaves the thread state as it is.
+  const uint64_t BlockSize = InlineTail->Size;
+  const auto End = reinterpret_cast<const uint8_t*>(BlockBegin + BlockSize);
+  auto Data = reinterpret_cast<const uint8_t*>(BlockBegin + InlineHeader->OffsetToBlockTail + InlineTail->OffsetToRIPEntries);
+  bool Valid = Data < End;
+  // Decodes from a copy, as a vl64 or vl64pair can read past its first byte
+  // before its size is known.
+  const auto Read = [&](auto Decode, size_t MaxSize) {
+    uint8_t Bytes[17] {};
+    memcpy(Bytes, Data, Valid ? std::min<size_t>(MaxSize, End - Data) : 0);
+    const auto Decoded = Decode(Bytes);
+    Valid = Valid && Decoded.Size <= static_cast<size_t>(End - Data);
+    Data += Valid ? Decoded.Size : 0;
+    return Decoded;
+  };
+  const auto ReadVL64 = [&](int64_t Max) {
+    const auto Integer = Read([](const uint8_t* Bytes) { return FEXCore::Utils::vl64::Decode(Bytes); }, 9).Integer;
+    Valid = Valid && Integer >= 0 && Integer <= Max;
+    return Valid ? Integer : 0;
+  };
+  const auto ReadU8 = [&]() {
+    Valid = Valid && Data < End;
+    return Valid ? *Data++ : uint8_t {};
+  };
+
+  for (uint32_t i = 0; Valid && i < InlineTail->NumberOfRIPEntries; ++i) {
+    Read([](const uint8_t* Bytes) { return FEXCore::Utils::vl64pair::Decode(Bytes); }, 17);
+  }
+  // Each entry takes two bytes at least.
+  const int64_t Count = ReadVL64((End - Data) / 2);
+  const int64_t SpillSlotCount = ReadVL64(BlockSize / CPU::CPUBackend::MaxSpillSlotSize);
+  const uint8_t ReducedByte = ReadU8();
+  const bool Reduced = ReducedByte == 1;
+  Valid = Valid && ReducedByte <= 1;
+
+  // Applies the changes of each entry at or before HostPC. An Unknown one in
+  // force leaves the thread state as it is.
+  bool Found = false;
+  bool Unknown = false;
+  uint8_t Push {}, ValidMask {}, EmptyMask {}, ValueMask {};
+  uint8_t Locations[8] {};
+  int64_t SpillSlots[8] {};
+  uint64_t Offset {};
+  for (int64_t i = 0; Valid && i < Count; ++i) {
+    Offset += ReadVL64((BlockSize - Offset) / 4) * 4;
+    if (!Valid || HostPC < BlockBegin + Offset) {
+      break;
+    }
+    Found = true;
+
+    const uint8_t Header = ReadU8();
+    Unknown = Header & CPU::CPUBackend::X87StackMapUnknown;
+    if (Unknown) {
+      continue;
+    }
+    Push = Header & CPU::CPUBackend::X87StackMapPush;
+    if (Header & CPU::CPUBackend::X87StackMapHasValidMask) {
+      ValidMask = ReadU8();
+    }
+    if (Header & CPU::CPUBackend::X87StackMapHasEmptyMask) {
+      EmptyMask = ReadU8();
+    }
+    if (Header & CPU::CPUBackend::X87StackMapHasValueMask) {
+      ValueMask = ReadU8();
+    }
+    const uint8_t ChangedMask = Header & CPU::CPUBackend::X87StackMapHasChangedMask ? ReadU8() : 0;
+    for (uint32_t Slot = 0; Slot < 8; ++Slot) {
+      if (ChangedMask & (1U << Slot)) {
+        Locations[Slot] = ReadU8();
+        if (Locations[Slot] & CPU::CPUBackend::X87StackMapInSpillSlot) {
+          SpillSlots[Slot] = ReadVL64(SpillSlotCount - 1);
+        }
+      }
+    }
+  }
+  if (!Valid || !Found || Unknown) {
+    return;
+  }
+
+  auto& State = Frame->State;
+  const uint8_t ContextTop = State.flags[X86State::X87FLAG_TOP_LOC] & 7;
+  for (uint32_t Slot = 0; Slot < 8; ++Slot) {
+    if (!(ValueMask & (1U << Slot))) {
+      continue;
+    }
+
+    const uint8_t Location = Locations[Slot];
+    __uint128_t Value;
+    if (Location & CPU::CPUBackend::X87StackMapInSpillSlot) {
+      memcpy(&Value, reinterpret_cast<const void*>(HostSP + SpillSlots[Slot] * CPU::CPUBackend::MaxSpillSlotSize), sizeof(Value));
+    } else {
+      Value = HostVRegs[Location & CPU::CPUBackend::X87StackMapRegister];
+    }
+
+    // As FlushCachedRegs and X87PCStoreLiveOut write the register slot: an
+    // 80-bit float, or in reduced precision a 64-bit float, with the 32-bit
+    // float it came from or the integer from FILD m64 in the upper half.
+    auto* Reg = State.mm[(ContextTop + Slot) & 7];
+    uint64_t Bits {};
+    memcpy(&Bits, &Value, sizeof(Bits));
+    switch ((Location >> CPU::CPUBackend::X87StackMapFormatShift) & 3) {
+    case CPU::CPUBackend::X87StackMapF80: memcpy(Reg, &Value, sizeof(Value)); break;
+    case CPU::CPUBackend::X87StackMapDouble:
+      if (Reduced) {
+        Reg[0] = Bits;
+        Reg[1] = 0;
+      } else {
+        softfloat_state SoftState {};
+        const X80SoftFloat Result(&SoftState, std::bit_cast<double>(Bits));
+        memcpy(Reg, &Result, sizeof(Result));
+        Reg[1] &= 0xffff;
+      }
+      break;
+    case CPU::CPUBackend::X87StackMapSingle: {
+      const auto SingleBits = static_cast<uint32_t>(Bits);
+      const float Single = std::bit_cast<float>(SingleBits);
+      if (Reduced) {
+        Reg[0] = std::bit_cast<uint64_t>(static_cast<double>(Single));
+        Reg[1] = SingleBits;
+      } else {
+        softfloat_state SoftState {};
+        const X80SoftFloat Result(&SoftState, Single);
+        memcpy(Reg, &Result, sizeof(Result));
+        Reg[1] &= 0xffff;
+      }
+      break;
+    }
+    case CPU::CPUBackend::X87StackMapInt64: {
+      const auto Integer = static_cast<int64_t>(Bits);
+      if (Reduced) {
+        Reg[0] = std::bit_cast<uint64_t>(static_cast<double>(Integer));
+        Reg[1] = Bits;
+      } else {
+        // FILD m64 only keeps its integer in reduced precision.
+        const uint64_t Magnitude = Integer < 0 ? 0 - Bits : Bits;
+        auto Result = ui64_to_extF80(Magnitude);
+        Result.signExp |= Integer < 0 ? 0x8000 : 0;
+        memcpy(&Reg[0], &Result.signif, sizeof(Reg[0]));
+        Reg[1] = Result.signExp;
+      }
+      break;
+    }
+    }
+  }
+
+  const auto Rotate = [ContextTop](uint8_t Mask) {
+    return static_cast<uint8_t>((Mask << ContextTop) | (Mask >> ((8 - ContextTop) & 7)));
+  };
+  State.AbridgedFTW = (State.AbridgedFTW | Rotate(ValidMask)) & ~Rotate(EmptyMask);
+  State.flags[X86State::X87FLAG_TOP_LOC] = (ContextTop - Push) & 7;
 }
 
 uint32_t ContextImpl::ReconstructCompactedEFLAGS(FEXCore::Core::InternalThreadState* Thread, bool WasInJIT, const uint64_t* HostGPRs,
@@ -657,21 +848,32 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
         // context once this flush has written it back.
         Thread->OpDispatcher->FlushRegisterCache(true);
 
-        if (ExtendedDebugInfo || Thread->OpDispatcher->CanHaveSideEffects(TableInfo, DecodedInfo)) {
+        // A decode error, a fetch fault at the first byte and an instruction past the 15-byte length limit have InstSize 0,
+        // as the length isn't known, which leaves no range to validate. A partial fetch fault keeps the bytes it could read.
+        const bool ValidatesCode = (Config.SMCChecks == FEXCore::Config::CONFIG_SMC_FULL || Block.ForceFullSMCDetection) && DecodedInfo->InstSize;
+
+        // A fault in ValidateCode is the instruction's fetch fault, which needs its RIP, see IsCodeValidationRead
+        if (ExtendedDebugInfo || ValidatesCode || Thread->OpDispatcher->CanHaveSideEffects(TableInfo, DecodedInfo)) {
           Thread->OpDispatcher->_GuestOpcode(InstAddress - GuestRIP);
         }
 
-        // A decode error, a fetch fault at the first byte and an instruction past the 15-byte length limit have InstSize 0,
-        // as the length isn't known, which leaves no range to validate. A partial fetch fault keeps the bytes it could read.
-        if ((Config.SMCChecks == FEXCore::Config::CONFIG_SMC_FULL || Block.ForceFullSMCDetection) && DecodedInfo->InstSize) {
+        if (ValidatesCode) {
           auto ExistingCodePtr = reinterpret_cast<uint8_t*>(Block.Entry + BlockInstructionsLength);
           auto InstAddressReg = Thread->OpDispatcher->_EntrypointOffset(GPRSize, InstAddress - GuestRIP);
 
-          auto Value = FEXCore::Utils::crc32(ExistingCodePtr, DecodedInfo->InstSize);
-          auto CRC = WantsDiskCachePatching ?
-                       Thread->OpDispatcher->_PatchableGuestCRC(IR::OpSize::i64Bit, Value, (int64_t)ExistingCodePtr, DecodedInfo->InstSize) :
-                       Thread->OpDispatcher->Constant(Value);
-          auto CodeChanged = Thread->OpDispatcher->_ValidateCode(CRC, InstAddressReg, DecodedInfo->InstSize);
+          // Fault-safe, as the decoder's reads are, see Decoder::FetchInstBytes. Bytes that went away since the decoder
+          // read them count as changed, so the block drops itself here, and the next compile stops at them.
+          std::array<uint8_t, 16> Code;
+          IR::Ref CodeChanged {};
+          if (FEXCore::ArchHelpers::Arm64::FaultSafeCopy(Code.data(), ExistingCodePtr, DecodedInfo->InstSize) == DecodedInfo->InstSize) {
+            auto Value = FEXCore::Utils::crc32(Code.data(), DecodedInfo->InstSize);
+            auto CRC = WantsDiskCachePatching ?
+                         Thread->OpDispatcher->_PatchableGuestCRC(IR::OpSize::i64Bit, Value, (int64_t)ExistingCodePtr, DecodedInfo->InstSize) :
+                         Thread->OpDispatcher->Constant(Value);
+            CodeChanged = Thread->OpDispatcher->_ValidateCode(CRC, InstAddressReg, DecodedInfo->InstSize);
+          } else {
+            CodeChanged = Thread->OpDispatcher->Constant(1);
+          }
 
           auto InvalidateCodeCond = Thread->OpDispatcher->CondJump(CodeChanged);
 
@@ -898,6 +1100,20 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
   // Invalidate might take a unique lock on this, to guarantee that during invalidation no code gets compiled
   auto lk = GuardSignalDeferringSection<std::shared_lock>(CodeInvalidationMutex, Thread);
 
+  // An attempt fails when the guest wrote to its code while it ran, and leaves the pages of that code trapped for
+  // writes. The lock stays held, so no write fault can make them writable again before the next attempt has read them,
+  // and that one only fails for code on other pages or for a page a guest syscall made writable meanwhile. The last
+  // attempt isn't checked: where the frontend traps nothing, a guest that keeps writing would fail every one.
+  static constexpr int MaxAttempts = 4;
+  for (int Attempt = 1;; ++Attempt) {
+    if (const auto HostCode = TryCompileBlock(Thread, GuestRIP, MaxInst, Attempt < MaxAttempts)) {
+      return *HostCode;
+    }
+  }
+}
+
+std::optional<uintptr_t>
+ContextImpl::TryCompileBlock(FEXCore::Core::InternalThreadState* Thread, uint64_t GuestRIP, uint64_t MaxInst, bool CheckWritableCode) {
   // Is the code in the cache?
   // The backends only check L1 and L2, not L3
   if (auto HostCode = Thread->LookupCache->FindBlock(Thread, GuestRIP)) {
@@ -906,9 +1122,9 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
 
   // GW2 on Mac (jdrly/gw2-on-mac#165), EntryCompileLock: threads running the same code miss on the same entry at the same
   // time, and each would compile its own copy into the shared code buffer. Take turns per entry, and look again once it's
-  // this thread's turn. It is taken inside the invalidation guard above and dropped before it, so whatever takes
-  // CodeInvalidationMutex exclusively (an invalidation, a fork) never runs while one is held. From FEX-Emu/FEX pull
-  // request 6081:
+  // this thread's turn. It is taken inside CompileBlock's invalidation guard and dropped before it, once per attempt, so
+  // whatever takes CodeInvalidationMutex exclusively (an invalidation, a fork) never runs while one is held. From
+  // FEX-Emu/FEX pull request 6081:
   // https://github.com/FEX-Emu/FEX/commit/61663da5bc8391130e4d3fdf0797f0ff9fe44161
   std::unique_lock<FEXCore::Utils::WritePriorityMutex::Mutex> EntryCompileLock;
   if (Config.EntryCompileLock()) {
@@ -930,9 +1146,20 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
       auto LoadedCode = Thread->CPUBackend->LoadCachedCode(Hit->HostCode);
       if (LoadedCode.BlockBegin) {
         for (auto& CodePage : Hit->GuestPages) {
-          if (Thread->LookupCache->AddBlockExecutableRange(Thread, Hit->EntryPointRIPs, CodePage, FEXCore::Utils::FEX_PAGE_SIZE)) {
+          Thread->LookupCache->AddBlockExecutableRange(Thread, Hit->EntryPointRIPs, CodePage, FEXCore::Utils::FEX_PAGE_SIZE, [&] {
+            SyscallHandler->MarkGuestExecutableRange(Thread, CodePage, FEXCore::Utils::FEX_PAGE_SIZE);
+          });
+        }
+
+        // A write that got in after Lookup copied the guest's code took no fault, as for a compile below
+        if (CheckWritableCode && Hit->Writable && !DiskCache.GuestCodeUnchanged(GuestRIP, *Hit)) {
+          for (auto CodePage : Hit->GuestPages) {
             SyscallHandler->MarkGuestExecutableRange(Thread, CodePage, FEXCore::Utils::FEX_PAGE_SIZE);
           }
+          Thread->FrontendDecoder->DelayedDisownBuffer();
+          Thread->FrontendDecoder->ValidateDisownedOrFree();
+          Thread->OpDispatcher->ValidateDisownedOrFree();
+          return std::nullopt;
         }
 
         LOGMAN_THROW_A_FMT(Hit->EntryPointRIPs.size() == Hit->EntryPointHostOffsets.size(), "Mismatched Disk Cache entrypoint pairs!");
@@ -1026,9 +1253,26 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
     CodePages.reserve(BlockInfo->CodePages.size());
     CodePages.insert(CodePages.end(), BlockInfo->CodePages.begin(), BlockInfo->CodePages.end());
     for (auto CodePage : BlockInfo->CodePages) {
-      if (Thread->LookupCache->AddBlockExecutableRange(Thread, BlockInfo->EntryPoints, CodePage, FEXCore::Utils::FEX_PAGE_SIZE)) {
+      Thread->LookupCache->AddBlockExecutableRange(Thread, BlockInfo->EntryPoints, CodePage, FEXCore::Utils::FEX_PAGE_SIZE, [&] {
+        SyscallHandler->MarkGuestExecutableRange(Thread, CodePage, FEXCore::Utils::FEX_PAGE_SIZE);
+      });
+    }
+
+    // The frontend only traps writes to a page from here on. A write that got in after the decoder read the page took
+    // no fault, so nothing invalidates a block compiled from the bytes before it: check that the decoder's bytes are
+    // still there. A later write faults and waits for this compile before it invalidates the page.
+    if (CheckWritableCode && BlockInfo->InWritableRange && !Thread->FrontendDecoder->WritableCodeUnchanged()) {
+      // A page that held code already wasn't trapped above, and a guest syscall may have made it writable again, which
+      // invalidates it only after this compile. So trap them all for the next attempt.
+      for (auto CodePage : BlockInfo->CodePages) {
         SyscallHandler->MarkGuestExecutableRange(Thread, CodePage, FEXCore::Utils::FEX_PAGE_SIZE);
       }
+      if (!CodeCache.IsGeneratingCache) {
+        Thread->CPUBackend->ClearRelocations();
+      }
+      Thread->FrontendDecoder->ValidateDisownedOrFree();
+      Thread->OpDispatcher->ValidateDisownedOrFree();
+      return std::nullopt;
     }
   }
 

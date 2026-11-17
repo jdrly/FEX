@@ -7,7 +7,8 @@
 #
 # gw2 (jdrly/gw2-on-mac#109): run one Win64 program under an engine, in a scratch prefix,
 # without a window, the way Mach9's smoke test runs its programs (athei/mach9 at v0.3.1,
-# bin/bundle-wine.sh: run_limited, run_fex, smoke_stop), and the way my Wine fork's
+# bin/bundle-wine.sh: run_limited, run_fex, smoke_stop; v0.4.0 adds a sample of a hung run and
+# case names for fex.exe, and runs the program the same way), and the way my Wine fork's
 # tests/gw2/run.zsh does.
 #
 #   run.zsh <wine> <prefix> <label> <seconds> <want> <exe> [<VAR=value>...]

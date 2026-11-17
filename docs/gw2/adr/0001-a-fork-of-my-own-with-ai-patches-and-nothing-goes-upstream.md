@@ -20,8 +20,11 @@ writes the patches here, and nothing ever goes to FEX-Emu/FEX or athei/FEX.
 - Issues are off. The work is tracked in jdrly/gw2-on-mac with the label `area:fex`.
 - I never make an annotated tag here, and no tag of FEX-Emu/FEX is fetched into the fork. FEX puts
   `git describe` into every built file, and it reads annotated tags only, so either would change the
-  build. My own tags are lightweight and name an engine's commit (`engine-0.3.1`).
+  build. My own tags are lightweight and name an engine's commit (`engine-0.3.1`, `engine-0.4.0`).
 - The fork moves to a new athei commit only when my app moves to the Mach9 engine built from it.
+  2026-11-17: the base is `597e7ccbedd` (`engine-0.4.0`), the commit Mach9 0.4.0 was built from. My
+  commits were rebased onto it, after a merge that keeps the old line in the history
+  (jdrly/gw2-on-mac#260).
 - FEX's own workflows are gone. They name self-hosted runners I don't have. `gw2.yml` is the only
   workflow.
 - Every commit an agent wrote says so, and an agent that didn't write the change reviews it.

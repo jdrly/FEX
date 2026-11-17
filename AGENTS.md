@@ -2,8 +2,9 @@
 
 This is my fork of FEX for one game, Guild Wars 2 (Steam, `Gw2-64.exe`), on my Apple Silicon
 Mac. The game runs in Mach9's arm64 Wine engine, where FEX translates all of its x86_64 code.
-The fork starts from athei/FEX at `9d4fa4b46b1`, the commit Mach9 0.3.1 was built from, and
-carries my changes for that engine on top.
+The fork starts from athei/FEX at `597e7ccbedd`, the commit Mach9 0.4.0 was built from, and
+carries my changes for that engine on top. Until 2026-11-17 it started from `9d4fa4b46b1`, Mach9
+0.3.1's.
 
 Its patches are written with AI. That is allowed here and nowhere upstream.
 
@@ -25,11 +26,12 @@ nothing, so the rule doesn't stop work here. What it does mean:
   it directly.
 - `macos-patched` and `main` mirror athei/FEX and get nothing of mine.
 - The fork has exactly athei/FEX's tags, plus lightweight tags of mine that name an engine's
-  commit (`engine-0.3.1` is `9d4fa4b46b1`). I never make an annotated tag here. `git describe
-  --abbrev=7` goes into every built file (`CMakeLists.txt`, `GIT_DESCRIBE_STRING`) and it reads
-  annotated tags only, so an annotated tag of mine would change the build. No tag of
-  FEX-Emu/FEX is ever fetched into the fork either. With their `FEX-2611` the engine's commit
-  would describe as `FEX-2611-39-g9d4fa4b` instead of the engine's `FEX-2610-215-g9d4fa4b`.
+  commit (`engine-0.3.1` is `9d4fa4b46b1`, `engine-0.4.0` is `597e7ccbedd`). I never make an
+  annotated tag here. `git describe --abbrev=7` goes into every built file (`CMakeLists.txt`,
+  `GIT_DESCRIBE_STRING`) and it reads annotated tags only, so an annotated tag of mine would
+  change the build. No tag of FEX-Emu/FEX is ever fetched into the fork either. With their
+  `FEX-2611` the engine's commit would describe as `FEX-2611-50-g597e7cc` instead of the
+  engine's `FEX-2610-226-g597e7cc`.
 - The fork moves to a new athei commit only when my app moves to the Mach9 engine built from
   it. Each move repeats the baseline against that engine's files.
 

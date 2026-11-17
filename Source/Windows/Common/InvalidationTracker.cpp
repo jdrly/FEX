@@ -13,9 +13,11 @@
 #include <winternl.h>
 
 namespace FEX::Windows {
-InvalidationTracker::InvalidationTracker(FEXCore::Context::Context& CTX, const std::unordered_map<DWORD, FEXCore::Core::InternalThreadState*>& Threads)
+InvalidationTracker::InvalidationTracker(FEXCore::Context::Context& CTX, const std::unordered_map<DWORD, FEXCore::Core::InternalThreadState*>& Threads,
+                                         bool GuestQueriesFixed)
   : CTX {CTX}
-  , Threads {Threads} {
+  , Threads {Threads}
+  , GuestQueriesFixed {GuestQueriesFixed} {
   FEX_CONFIG_OPT(SMCChecks, SMCCHECKS);
   SMCDetectionDisabled = (SMCChecks == FEXCore::Config::CONFIG_SMC_NONE);
 
@@ -54,9 +56,8 @@ bool InvalidationTracker::ProtIsEffectivelyExecutable(ULONG Prot) const {
 
 void InvalidationTracker::AddExecutableInterval(FEXCore::IntervalList<uint64_t>::Interval ProtInterval, ULONG Prot) {
   XIntervals.Insert(ProtInterval);
-  // A range made executable and read-only stays in RWXIntervals, so a write to it is still taken for SMC and made
-  // writable. While FEX traps writes to a range, VirtualProtect and VirtualQuery report PAGE_EXECUTE_READ for it, so
-  // a guest that saved that protection and restores it after patching still expects the range to be writable.
+  // Prot may be the protection of a trap, so a read-only one takes nothing out of RWXIntervals here, see
+  // HandleMemoryProtectionNotification
   if (ProtIsWritable(Prot)) {
     LogMan::Msg::DFmt("Add SMC interval: {:X} - {:X}", ProtInterval.Offset, ProtInterval.End);
     RWXIntervals.Insert(ProtInterval);
@@ -81,10 +82,34 @@ void InvalidationTracker::HandleMemoryProtectionNotification(uint64_t Address, u
 
     if (ProtIsEffectivelyExecutable(Prot)) {
       AddExecutableInterval(ProtInterval, Prot);
+      // Only a protect or commit of this process passes CodeLockHeld here. It holds ThreadCreationMutex from before its
+      // syscall, so no write fault made the range writable again since. A queued one of another process can come after
+      // such a fault, so it leaves the range in RWXIntervals, apart from what HandleCrossProcessProtectNotification took
+      // out before.
+      if (!ProtIsWritable(Prot) && CodeLockHeld && GuestQueriesFixed) {
+        // FixMemoryInfo gives this process's queries the guest's protection, so this is the guest's own RX
+        RWXIntervals.Remove(ProtInterval);
+        TrappedIntervals.Remove(ProtInterval);
+        OtherProtectedIntervals.Remove(ProtInterval);
+      } else if (!ProtIsWritable(Prot) && CodeLockHeld) {
+        // Without FixMemoryInfo, VirtualQuery reports PAGE_EXECUTE_READ for a page FEX trapped, so the guest may be
+        // restoring a protection it got there, which on Windows leaves the page writable. Only a page FEX never trapped
+        // is made read-only for it.
+        for (auto Begin = ProtInterval.Offset; Begin < ProtInterval.End;) {
+          const auto Query = TrappedIntervals.Query(Begin);
+          const auto End = Query.Size ? std::min<uint64_t>(ProtInterval.End, Begin + Query.Size) : ProtInterval.End;
+          if (!Query.Enclosed) {
+            RWXIntervals.Remove({Begin, End});
+          }
+          Begin = End;
+        }
+      }
       return true;
     } else if (XIntervals.Intersect(ProtInterval)) {
       XIntervals.Remove(ProtInterval);
       RWXIntervals.Remove(ProtInterval);
+      TrappedIntervals.Remove(ProtInterval);
+      OtherProtectedIntervals.Remove(ProtInterval);
       if (DEPDisabled) {
         DEPPromotedIntervals.Remove(ProtInterval);
       }
@@ -100,6 +125,88 @@ void InvalidationTracker::HandleMemoryProtectionNotification(uint64_t Address, u
   }
 }
 
+void InvalidationTracker::HandleCrossProcessProtectNotification(uint64_t Address, uint64_t Size, ULONG Prot) {
+  const auto AlignedBase = Address & FEXCore::Utils::FEX_PAGE_MASK;
+  const auto AlignedEnd = (Address + Size + FEXCore::Utils::FEX_PAGE_SIZE - 1) & FEXCore::Utils::FEX_PAGE_MASK;
+  const FEXCore::IntervalList<uint64_t>::Interval ProtInterval {AlignedBase, AlignedEnd};
+
+  // Another process sees the trap's protection on a page FEX trapped, as its queries and the old protection of its
+  // protects don't come through FixMemoryInfo. So a protect of it to read-only can give back the protection it saw after
+  // it changed the page, as kernelbase's WriteProcessMemory does after making the page writable for its write, where on
+  // Windows the page stays writable. Each other protect of it records the trapped pages it covers, and the protect to
+  // read-only gives a recorded page back to RWXIntervals. Any other protect to read-only is the guest's read-only, as on
+  // Windows, and takes the page out. A page that is writable by now keeps what it had, its record included: a write
+  // fault may have untrapped it after the protect, before this runs, or a later protect of the other process made it
+  // writable again, and then the page stays writable for this process, as without this. Left open: another process that
+  // changes a page FEX trapped and later makes it read-only on purpose leaves it writable for this one, and so does an
+  // own protect to RWX between that protect and a compile that traps the page again before the queued one runs, as the
+  // order of the two is not defined. A write of this process to a recorded page that another process has given back
+  // read-only, before this runs, is an access violation, where on Windows the page is writable.
+  const bool ReadOnly = ProtIsEffectivelyExecutable(Prot) && !ProtIsWritable(Prot);
+  fextl::vector<FEXCore::IntervalList<uint64_t>::Interval> Trapped;
+  if (AlignedEnd > AlignedBase) {
+    std::unique_lock Lock(IntervalsLock);
+
+    if (!ReadOnly) {
+      // The pages already recorded too: the notification takes them out of OtherProtectedIntervals for a protect that
+      // isn't executable
+      for (const auto* List : {&TrappedIntervals, &OtherProtectedIntervals}) {
+        for (auto Begin = AlignedBase; Begin < AlignedEnd;) {
+          const auto Query = List->Query(Begin);
+          const auto End = Query.Size ? std::min<uint64_t>(AlignedEnd, Begin + Query.Size) : AlignedEnd;
+          if (Query.Enclosed) {
+            Trapped.push_back({Begin, End});
+          }
+          Begin = End;
+        }
+      }
+    } else if (RWXIntervals.Intersect(ProtInterval) || OtherProtectedIntervals.Intersect(ProtInterval)) {
+      // In the cross-process work, queries go to the syscall without FixMemoryInfo, see ProcessCrossProcessWork
+      for (auto Begin = AlignedBase; Begin < AlignedEnd;) {
+        MEMORY_BASIC_INFORMATION Info;
+        if (NtQueryVirtualMemory(NtCurrentProcess(), reinterpret_cast<void*>(Begin), MemoryBasicInformation, &Info, sizeof(Info), nullptr)) {
+          break;
+        }
+        const auto RegionEnd = std::min<uint64_t>(AlignedEnd, reinterpret_cast<uint64_t>(Info.BaseAddress) + Info.RegionSize);
+        if (!ProtIsWritable(Info.Protect)) {
+          for (auto Page = Begin; Page < RegionEnd;) {
+            const auto Query = OtherProtectedIntervals.Query(Page);
+            const auto End = Query.Size ? std::min<uint64_t>(RegionEnd, Page + Query.Size) : RegionEnd;
+            if (Query.Enclosed) {
+              // Trapped again, with the trap's protection the protect gave back
+              XIntervals.Insert({Page, End});
+              RWXIntervals.Insert({Page, End});
+              TrappedIntervals.Insert({Page, End});
+              OtherProtectedIntervals.Remove({Page, End});
+            } else {
+              RWXIntervals.Remove({Page, End});
+              TrappedIntervals.Remove({Page, End});
+            }
+            Page = End;
+          }
+        }
+        Begin = RegionEnd;
+      }
+    }
+  }
+
+  HandleMemoryProtectionNotification(Address, Size, Prot);
+
+  // After the notification, which takes a protect that isn't executable out of every list
+  if (!Trapped.empty()) {
+    std::unique_lock Lock(IntervalsLock);
+    for (const auto& Interval : Trapped) {
+      OtherProtectedIntervals.Insert(Interval);
+    }
+  }
+}
+
+void InvalidationTracker::HandleCrossProcessWorkLost() {
+  // Any protect of the lost work may have been the change that a protect to read-only queued later gives back
+  std::unique_lock Lock(IntervalsLock);
+  OtherProtectedIntervals.Insert(TrappedIntervals);
+}
+
 bool InvalidationTracker::ProtectTakesCodeAway(uint64_t Address, uint64_t Size, ULONG Prot) {
   const auto AlignedBase = Address & FEXCore::Utils::FEX_PAGE_MASK;
   const auto AlignedEnd = (Address + Size + FEXCore::Utils::FEX_PAGE_SIZE - 1) & FEXCore::Utils::FEX_PAGE_MASK;
@@ -108,6 +215,10 @@ bool InvalidationTracker::ProtectTakesCodeAway(uint64_t Address, uint64_t Size, 
   }
 
   std::shared_lock Lock(IntervalsLock);
+  // Trapped pages are made writable again before the syscall, see UntrapForProtect
+  if (RWXIntervals.Intersect({AlignedBase, AlignedEnd})) {
+    return true;
+  }
   if (ProtIsEffectivelyExecutable(Prot)) {
     return false;
   }
@@ -130,6 +241,14 @@ bool InvalidationTracker::ProtectTakesCodeAway(uint64_t Address, uint64_t Size, 
     Base = reinterpret_cast<uint64_t>(Info.BaseAddress) + Info.RegionSize;
   }
   return false;
+}
+
+void InvalidationTracker::UntrapForProtect(uint64_t Address, uint64_t Size) {
+  const auto AlignedBase = Address & FEXCore::Utils::FEX_PAGE_MASK;
+  const auto AlignedEnd = (Address + Size + FEXCore::Utils::FEX_PAGE_SIZE - 1) & FEXCore::Utils::FEX_PAGE_MASK;
+  if (AlignedEnd > AlignedBase) {
+    ProtectRWXIntervalsInternal(AlignedBase, AlignedEnd - AlignedBase, true);
+  }
 }
 
 bool InvalidationTracker::AllocTakesCodeAway(uint64_t Address, uint64_t Size, ULONG Type, ULONG Prot) {
@@ -217,6 +336,8 @@ void InvalidationTracker::HandleProcessExecuteFlagsChange(ULONG Flags) {
     for (const auto& Interval : DEPPromotedIntervals) {
       XIntervals.Remove(Interval);
       RWXIntervals.Remove(Interval);
+      TrappedIntervals.Remove(Interval);
+      OtherProtectedIntervals.Remove(Interval);
     }
     DEPPromotedIntervals.Clear();
   }
@@ -294,6 +415,8 @@ InvalidationTracker::InvalidateContainingSectionResult InvalidationTracker::Inva
     std::unique_lock Lock(IntervalsLock);
     XIntervals.Remove({SectionBase, SectionBase + SectionSize});
     RWXIntervals.Remove({SectionBase, SectionBase + SectionSize});
+    TrappedIntervals.Remove({SectionBase, SectionBase + SectionSize});
+    OtherProtectedIntervals.Remove({SectionBase, SectionBase + SectionSize});
     ForgetFetchFaultPages(SectionBase, SectionBase + SectionSize);
     UnmappingSection = {SectionBase, SectionBase + SectionSize};
   }
@@ -332,10 +455,14 @@ void InvalidationTracker::InvalidateAlignedInterval(uint64_t Address, uint64_t S
     // in FinishSectionUnmap. So a free outside of both has no block to invalidate.
     if (!XIntervals.Intersect({AlignedBase, AlignedBase + AlignedSize}) &&
         FetchFaultPages.lower_bound(AlignedBase) == FetchFaultPages.lower_bound(AlignedBase + AlignedSize)) {
+      // A page another process took out of the intervals stays recorded, see HandleCrossProcessProtectNotification
+      OtherProtectedIntervals.Remove({AlignedBase, AlignedBase + AlignedSize});
       return;
     }
     XIntervals.Remove({AlignedBase, AlignedBase + AlignedSize});
     RWXIntervals.Remove({AlignedBase, AlignedBase + AlignedSize});
+    TrappedIntervals.Remove({AlignedBase, AlignedBase + AlignedSize});
+    OtherProtectedIntervals.Remove({AlignedBase, AlignedBase + AlignedSize});
     ForgetFetchFaultPages(AlignedBase, AlignedBase + AlignedSize);
   }
 
@@ -467,6 +594,12 @@ bool InvalidationTracker::TrackExecutableMapping(uint64_t Address) {
 
   const auto Base = reinterpret_cast<uint64_t>(Info.BaseAddress);
   AddExecutableInterval({Base, Base + Info.RegionSize}, Info.Protect);
+  // A block on the page before a page of the range counts that page among its code pages, as the decoder adds the page of
+  // the longest instruction it could find, and outside the intervals that trapped nothing. The lookup cache only traps a
+  // page when it first holds code, so the range is trapped now.
+  if (ProtIsWritable(Info.Protect)) {
+    ProtectRWXIntervalsLocked(Base, Info.RegionSize, false);
+  }
   return true;
 }
 
@@ -530,6 +663,11 @@ InvalidationTracker::FetchFault InvalidationTracker::HandleFetchFault(uint64_t A
   return FetchFault::Retry;
 }
 
+void InvalidationTracker::HandleCompileReadFault(uint64_t Address) {
+  std::unique_lock Lock(IntervalsLock);
+  FetchFaultPages[Address & FEXCore::Utils::FEX_PAGE_MASK] = ++FetchFaultGeneration;
+}
+
 FEXCore::HLE::ExecutableRangeInfo InvalidationTracker::QueryExecutableRange(uint64_t Address) {
   {
     std::shared_lock Lock(IntervalsLock);
@@ -545,7 +683,8 @@ FEXCore::HLE::ExecutableRangeInfo InvalidationTracker::QueryExecutableRange(uint
   // each compile that reaches it. The lock is held across the query, so a change of protection or a release that
   // notifies after its syscall can't be overwritten by what the query saw before it. ThreadCreationMutex can't be taken
   // for that. The locks go in the order ThreadCreationMutex, code invalidation mutex, IntervalsLock, and a compile holds
-  // the code invalidation mutex here. A free, protect or commit that takes code away holds that mutex from before its
+  // the code invalidation mutex here. OtherProtectedIntervals takes no lock of its own: it is used with IntervalsLock held
+  // exclusively. A free, protect or commit that takes code away holds that mutex from before its
   // syscall on, see ProtectTakesCodeAway, so no compile gets here during one. An unmap doesn't, as UnmappingSection
   // already keeps what a compile finds here out of the intervals, see TrackExecutableMapping.
   std::unique_lock Lock(IntervalsLock);
@@ -614,6 +753,76 @@ void InvalidationTracker::DisableSMCDetection() {
   } while (Query.Size);
 }
 
+bool InvalidationTracker::MayBeTrapped(uint64_t Address, uint64_t Size) {
+  if (!AnyTrapped.load(std::memory_order_relaxed)) {
+    return false;
+  }
+  const auto AlignedBase = Address & FEXCore::Utils::FEX_PAGE_MASK;
+  const auto AlignedEnd = (Address + Size + FEXCore::Utils::FEX_PAGE_SIZE - 1) & FEXCore::Utils::FEX_PAGE_MASK;
+  std::shared_lock Lock(IntervalsLock);
+  return RWXIntervals.Intersect({AlignedBase, AlignedEnd});
+}
+
+void InvalidationTracker::FixMemoryInfo(MEMORY_BASIC_INFORMATION& Info) {
+  // Only these protections can be a trap, or that of a region a trapped page continues
+  if (!AnyTrapped.load(std::memory_order_relaxed) || Info.State != MEM_COMMIT ||
+      (Info.Protect != PAGE_EXECUTE_READ && Info.Protect != PAGE_EXECUTE_READWRITE && Info.Protect != PAGE_READONLY &&
+       Info.Protect != PAGE_READWRITE)) {
+    return;
+  }
+
+  std::shared_lock Lock(IntervalsLock);
+  // The protection the guest gave a region Wine reported with Prot, and where the guest's region ends. A page in
+  // RWXIntervals with the trap's protection is one FEX trapped, and pages the guest made read-only end at the next
+  // page that may be one.
+  const auto Visible = [this](uint64_t Base, uint64_t End, ULONG Prot) -> std::pair<ULONG, uint64_t> {
+    if (Prot != GetTrapProt(Base)) {
+      return {Prot, End};
+    }
+    const auto Query = RWXIntervals.Query(Base);
+    if (Query.Enclosed) {
+      return {GetUntrapProt(Base), std::min(End, Query.Interval.End)};
+    }
+    return {Prot, Query.Size ? std::min(End, Base + Query.Size) : End};
+  };
+
+  const auto Base = reinterpret_cast<uint64_t>(Info.BaseAddress);
+  auto [Prot, End] = Visible(Base, Base + Info.RegionSize, Info.Protect);
+
+  // Wine ends a region where a trap starts or ends, Windows where the protection changes, so a writable region is joined
+  // with the next one of the same attributes. Wine merges pages with the same protection, so the next region is only
+  // queried when it can continue this one: after a trapped region, where it is in RWXIntervals, and after another one,
+  // where it is a page FEX trapped since it entered them. The query goes to the syscall: the ARM64EC wrapper enters the
+  // syscall callback state before it calls this hook, also for a query FEX made outside of that state, and WOW64 calls the
+  // native ntdll. FEX's own queries also come here on ARM64EC, see IntervalsLock.
+  const auto MayContinue = [this](uint64_t Address, bool Trapped) {
+    if (Trapped) {
+      return RWXIntervals.Query(Address).Enclosed;
+    }
+    std::scoped_lock TrappedLock(TrappedIntervalsLock);
+    return TrappedIntervals.Query(Address).Enclosed;
+  };
+  if (ProtIsWritable(Prot)) {
+    bool Trapped = Prot != Info.Protect;
+    MEMORY_BASIC_INFORMATION Next;
+    while (MayContinue(End, Trapped) &&
+           !NtQueryVirtualMemory(NtCurrentProcess(), reinterpret_cast<void*>(End), MemoryBasicInformation, &Next, sizeof(Next), nullptr) &&
+           Next.State == MEM_COMMIT && Next.AllocationBase == Info.AllocationBase &&
+           Next.AllocationProtect == Info.AllocationProtect && Next.Type == Info.Type) {
+      const auto NextBase = reinterpret_cast<uint64_t>(Next.BaseAddress);
+      const auto [NextProt, NextEnd] = Visible(NextBase, NextBase + Next.RegionSize, Next.Protect);
+      if (NextProt != Prot) {
+        break;
+      }
+      End = NextEnd;
+      Trapped = NextProt != Next.Protect;
+    }
+  }
+
+  Info.Protect = Prot;
+  Info.RegionSize = End - Base;
+}
+
 ULONG InvalidationTracker::GetTrapProt(uint64_t Address) const {
   if (DEPDisabled && DEPPromotedIntervals.Query(Address).Enclosed) {
     return PAGE_READONLY;
@@ -647,8 +856,12 @@ void InvalidationTracker::InvalidateIntervalInternalLocked(uint64_t Address, uin
 }
 
 bool InvalidationTracker::ProtectRWXIntervalsInternal(uint64_t Address, uint64_t Size, bool ForWriteLocked) {
-  const auto End = Address + Size;
   std::shared_lock Lock(IntervalsLock);
+  return ProtectRWXIntervalsLocked(Address, Size, ForWriteLocked);
+}
+
+bool InvalidationTracker::ProtectRWXIntervalsLocked(uint64_t Address, uint64_t Size, bool ForWriteLocked) {
+  const auto End = Address + Size;
 
   if (SMCDetectionDisabled) {
     return false;
@@ -669,13 +882,29 @@ bool InvalidationTracker::ProtectRWXIntervalsInternal(uint64_t Address, uint64_t
         HitRWXInterval = true;
       }
       const auto Protect = [&](uint64_t ProtectBase, uint64_t ProtectEnd) {
-        void* TmpAddress = reinterpret_cast<void*>(ProtectBase);
-        SIZE_T TmpSize = static_cast<SIZE_T>(ProtectEnd - ProtectBase);
-        ULONG TmpProt;
-        NtProtectVirtualMemory(NtCurrentProcess(), &TmpAddress, &TmpSize,
-                               ForWriteLocked ? GetUntrapProt(ProtectBase) : GetTrapProt(ProtectBase), &TmpProt);
+        const auto ProtectWith = [&](ULONG Prot) {
+          void* TmpAddress = reinterpret_cast<void*>(ProtectBase);
+          SIZE_T TmpSize = static_cast<SIZE_T>(ProtectEnd - ProtectBase);
+          ULONG TmpProt;
+          return NT_SUCCESS(NtProtectVirtualMemory(NtCurrentProcess(), &TmpAddress, &TmpSize, Prot, &TmpProt));
+        };
+        if (!ForWriteLocked) {
+          ProtectWith(GetTrapProt(ProtectBase));
+          return;
+        }
+        // Wine refuses the writable protections on a copy-on-write view of a section, see HandleRWXAccessViolation
+        const auto UntrapProt = GetUntrapProt(ProtectBase);
+        if (!ProtectWith(UntrapProt)) {
+          ProtectWith(UntrapProt == PAGE_READWRITE ? PAGE_WRITECOPY : PAGE_EXECUTE_WRITECOPY);
+        }
       };
       const auto ChunkEnd = std::min(End, Address + Query.Size);
+      if (!ForWriteLocked) {
+        std::scoped_lock TrappedLock(TrappedIntervalsLock);
+        TrappedIntervals.Insert({Address & FEXCore::Utils::FEX_PAGE_MASK, ChunkEnd});
+        // Before the protect, whose syscall orders it before any query that sees the trap
+        AnyTrapped.store(true, std::memory_order_relaxed);
+      }
       if (ForWriteLocked || UntrackedWrites.empty()) {
         Protect(Address, ChunkEnd);
       } else {

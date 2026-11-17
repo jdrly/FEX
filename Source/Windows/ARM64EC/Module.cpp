@@ -154,6 +154,8 @@ struct FrontendThreadData {
   // Set from the first to the second notification around a syscall that takes code away, see NotifyAroundSyscall
   bool HoldsCodeLock {};
   FEX::Windows::InvalidationTracker::FetchRetry LastFetchRetry {};
+  // The untracked write of an NtReadFile or NtWriteVirtualMemory in progress, see BTCpu64NotifyReadFile and
+  // __wine_notify_memory_write
   bool InUntrackedRead {};
   uint64_t UntrackedReadAddress {};
   uint64_t UntrackedReadSize {};
@@ -168,6 +170,8 @@ std::optional<FEX::Windows::InvalidationTracker> InvalidationTracker;
 std::optional<FEX::Windows::CPUFeatures> CPUFeatures;
 std::optional<FEX::Windows::OvercommitTracker> OvercommitTracker;
 std::optional<FEX::Windows::ImageTracker> ImageTracker;
+// Set before ProcessInit by a Wine that calls __wine_fix_memory_info after each query of the guest
+bool WineFixesMemoryInfo {};
 
 std::recursive_mutex ThreadCreationMutex;
 // Map of TIDs to their FEX thread state, `ThreadCreationMutex` must be locked when accessing
@@ -238,10 +242,11 @@ FrontendThreadData* GetFrontendThreadData(FEXCore::Core::InternalThreadState* Th
 
 // Wine queues the memory notifications and instruction cache flushes that other processes make for this one, and a
 // thread of this one processes them when FEX calls ProcessPendingCrossProcessEmulatorWork. The two notifications around
-// a syscall become two items there, which different threads can process, and the second one is lost when the queue is
-// full. Holding ThreadCreationMutex from the first to the second, as around a syscall of this process, could keep it
-// held for long or for good, and orders nothing, as the other process makes its syscall without waiting for this one.
-// So for queued items the first notification does nothing, and the second one takes the mutex only for its own work.
+// a syscall become two items there, which different threads can process, and when the queue is full Wine drops the work
+// and has FEX flush all code instead, see FlushInstructionCacheHeavy. Holding ThreadCreationMutex from the first to the
+// second, as around a syscall of this process, could keep it held for long or for good, and orders nothing, as the
+// other process makes its syscall without waiting for this one. So for queued items the first notification does
+// nothing, and the second one takes the mutex only for its own work.
 // The work runs in the syscall callback state, as Wine runs the hooks for this process's own syscalls. There Wine's
 // wrappers don't call the hooks for the memory syscalls that FEX makes itself, such as rpmalloc committing memory while
 // InvalidationTracker holds its lock, which would otherwise wait for that lock again in the same thread. Every caller
@@ -259,21 +264,23 @@ void ProcessCrossProcessWork() {
 }
 
 // Handles a notification of a pair around a syscall, with Work done in the second one (After), see ProcessCrossProcessWork.
+// Work's second argument says whether the notification is a queued one of another process.
 // If TakesCodeAway returns true, which it does with ThreadCreationMutex held, the code invalidation mutex is held from the
 // first notification to the end of Work, which gets true for that, see InvalidationTracker::ProtectTakesCodeAway. Wine
 // doesn't call these hooks for FEX's own syscalls, as a compile runs in the syscall callback state, so no compile is
 // waited for by the thread running it, and a suspend or termination of the thread waits for the end of the second one.
 // That is not done for queued items: the other process doesn't wait for this one, so it can't be held off by a lock here.
+// Returns whether the first notification took the code invalidation mutex.
 template<typename TakesCodeAwayFunc, typename WorkFunc>
-void NotifyAroundSyscall(BOOL After, TakesCodeAwayFunc&& TakesCodeAway, WorkFunc&& Work) {
+bool NotifyAroundSyscall(BOOL After, TakesCodeAwayFunc&& TakesCodeAway, WorkFunc&& Work) {
   auto* Thread = GetCPUArea().ThreadState();
   auto* Data = Thread->FrontendPtr ? GetFrontendThreadData(Thread) : nullptr;
   if (Data && Data->InCrossProcessWork) {
     if (After) {
       std::scoped_lock Lock(ThreadCreationMutex);
-      Work(false);
+      Work(false, true);
     }
-    return;
+    return false;
   }
 
   if (!After) {
@@ -281,15 +288,17 @@ void NotifyAroundSyscall(BOOL After, TakesCodeAwayFunc&& TakesCodeAway, WorkFunc
     if (Data && TakesCodeAway()) {
       CTX->GetCodeInvalidationMutex().lock();
       Data->HoldsCodeLock = true;
+      return true;
     }
   } else {
     const bool CodeLockHeld = Data && std::exchange(Data->HoldsCodeLock, false);
-    Work(CodeLockHeld);
+    Work(CodeLockHeld, false);
     if (CodeLockHeld) {
       CTX->GetCodeInvalidationMutex().unlock();
     }
     ThreadCreationMutex.unlock();
   }
+  return false;
 }
 
 bool IsEmulatorStackAddress(const ThreadCPUArea CPUArea, uint64_t Address) {
@@ -704,6 +713,7 @@ static void ReconstructThreadState(FEXCore::Core::InternalThreadState* Thread, A
   auto& State = Thread->CurrentFrame->State;
 
   State.rip = CTX->RestoreRIPFromHostPC(Thread, Context.Pc);
+  CTX->ReconstructX87State(Thread, Context.Pc, reinterpret_cast<const __uint128_t*>(Context.V), Context.Sp);
 
   // Spill all SRA GPRs
   for (size_t i = 0; i < Config.SRAGPRCount; i++) {
@@ -783,8 +793,9 @@ static ARM64_NT_CONTEXT StoreStateToPackedECContext(FEXCore::Core::InternalThrea
   ECContext.X24 = 0;
   ECContext.X28 = 0;
 
-  // NZCV+SS will be converted into EFlags by ntdll, the rest are lost during exception handling.
-  // See HandleGuestException
+  // ntdll converts NZCV+SS into EFlags. Our Wine also converts the Cpsr bits below, which are RES0 in AArch64 and kept
+  // by its kernel side, into PF, AF and DF (eflags_to_cpsr in dlls/ntdll/unwind.h). The rest are lost during exception
+  // handling, see SyncThreadContext.
   uint32_t EFlags = CTX->ReconstructCompactedEFLAGS(Thread, false, nullptr, 0);
   ECContext.Cpsr = 0;
   ECContext.Cpsr |= (EFlags & (1U << FEXCore::X86State::RFLAG_TF_RAW_LOC)) ? (1U << 21) : 0;
@@ -792,6 +803,9 @@ static ARM64_NT_CONTEXT StoreStateToPackedECContext(FEXCore::Core::InternalThrea
   ECContext.Cpsr |= (EFlags & (1U << FEXCore::X86State::RFLAG_CF_RAW_LOC)) ? (1U << 29) : 0;
   ECContext.Cpsr |= (EFlags & (1U << FEXCore::X86State::RFLAG_ZF_RAW_LOC)) ? (1U << 30) : 0;
   ECContext.Cpsr |= (EFlags & (1U << FEXCore::X86State::RFLAG_SF_RAW_LOC)) ? (1U << 31) : 0;
+  ECContext.Cpsr |= (EFlags & (1U << FEXCore::X86State::RFLAG_PF_RAW_LOC)) ? (1U << 14) : 0;
+  ECContext.Cpsr |= (EFlags & (1U << FEXCore::X86State::RFLAG_AF_RAW_LOC)) ? (1U << 15) : 0;
+  ECContext.Cpsr |= (EFlags & (1U << FEXCore::X86State::RFLAG_DF_RAW_LOC)) ? (1U << 5) : 0;
 
   ECContext.Fpcr = FPCR;
   ECContext.Fpsr = FPSR;
@@ -813,11 +827,14 @@ static ARM64_NT_CONTEXT StoreStateToPackedECContext(FEXCore::Core::InternalThrea
 static void RaiseException(FEXCore::Core::InternalThreadState* Thread, const EXCEPTION_RECORD& Rec, ARM64_NT_CONTEXT& GuestContext) {
   auto& Fault = Thread->CurrentFrame->SynchronousFaultData;
 
-  // X64 Windows always clears TF, DF and AF when handling an exception, restoring after.
-  // Current ARM64EC windows can only restore NZCV+SS when returning from an exception and other flags are left untouched from the handler context.
-  // TODO: Can extend wine to support this by mapping the remaining EFlags into reserved cpsr members.
+  // X64 Windows runs the exception dispatcher and the handlers with TF, DF and AC clear, and restores the EFlags of the
+  // context when a handler continues it. GuestContext carries TF and DF (see StoreStateToPackedECContext), and the
+  // handlers run on the JIT state, so clear the two there. AC stays: the context cannot carry it back, and FEX does not
+  // check alignment.
+  static constexpr uint32_t DispatchClearedEFlags {(1U << FEXCore::X86State::RFLAG_TF_RAW_LOC) |
+                                                   (1U << FEXCore::X86State::RFLAG_DF_RAW_LOC)};
   const uint32_t EFlags = CTX->ReconstructCompactedEFLAGS(Thread, false, nullptr, 0);
-  CTX->SetFlagsFromCompactedEFLAGS(Thread, EFlags & ~(1 << FEXCore::X86State::RFLAG_TF_RAW_LOC));
+  CTX->SetFlagsFromCompactedEFLAGS(Thread, EFlags & ~DispatchClearedEFlags);
 
   BOOL FirstChance = TRUE;
   EXCEPTION_RECORD GuestRec =
@@ -872,7 +889,9 @@ static void RethrowGuestException(FEXCore::Core::InternalThreadState* Thread, co
   auto GuestContext = StoreStateToPackedECContext(Thread, HostContext.Fpcr, HostContext.Fpsr);
   LogMan::Msg::DFmt("pc: {:X} rip: {:X}", HostContext.Pc, GuestContext.Pc);
 
-  RaiseException(Thread, Rec, GuestContext);
+  EXCEPTION_RECORD GuestRec = Rec;
+  FEX::Windows::ApplyCodeValidationFault(*CTX, Thread, GuestRec, HostContext.Pc, GuestContext.Pc);
+  RaiseException(Thread, GuestRec, GuestContext);
 }
 
 [[noreturn]]
@@ -964,11 +983,13 @@ public:
 extern "C" void SyncThreadContext(CONTEXT* Context) {
   ProcessCrossProcessWork();
   auto* Thread = GetCPUArea().ThreadState();
-  // All other EFlags bits are lost when converting to/from an ARM64EC context, so merge them in from the current JIT state.
-  // This is advisable over dropping their values as thread suspend/resume uses this function, and that can happen at any point in guest code.
+  // All other EFlags bits than these (see StoreStateToPackedECContext) are lost when converting to/from an ARM64EC context,
+  // so merge them in from the current JIT state. This is advisable over dropping their values as thread suspend/resume
+  // uses this function, and that can happen at any point in guest code.
   static constexpr uint32_t ECValidEFlagsMask {(1U << FEXCore::X86State::RFLAG_OF_RAW_LOC) | (1U << FEXCore::X86State::RFLAG_CF_RAW_LOC) |
                                                (1U << FEXCore::X86State::RFLAG_ZF_RAW_LOC) | (1U << FEXCore::X86State::RFLAG_SF_RAW_LOC) |
-                                               (1U << FEXCore::X86State::RFLAG_TF_RAW_LOC)};
+                                               (1U << FEXCore::X86State::RFLAG_TF_RAW_LOC) | (1U << FEXCore::X86State::RFLAG_PF_RAW_LOC) |
+                                               (1U << FEXCore::X86State::RFLAG_AF_RAW_LOC) | (1U << FEXCore::X86State::RFLAG_DF_RAW_LOC)};
 
   uint32_t StateEFlags = CTX->ReconstructCompactedEFLAGS(Thread, false, nullptr, 0);
   Context->EFlags = (Context->EFlags & ECValidEFlagsMask) | (StateEFlags & ~ECValidEFlagsMask);
@@ -1026,7 +1047,7 @@ NTSTATUS ProcessInit() {
   CTX->SetSyscallHandler(SyscallHandler.get());
   CTX->InitCore();
   Exception::HandlerConfig.emplace();
-  InvalidationTracker.emplace(*CTX, Threads);
+  InvalidationTracker.emplace(*CTX, Threads, WineFixesMemoryInfo);
   ImageTracker.emplace(*CTX, false);
 
   auto MainModule = reinterpret_cast<__TEB*>(NtCurrentTeb())->Peb->ImageBaseAddress;
@@ -1230,6 +1251,15 @@ bool ResetToConsistentStateImpl(const ThreadCPUArea CPUArea, EXCEPTION_RECORD* E
 
 NTSTATUS ResetToConsistentState(EXCEPTION_RECORD* Exception, CONTEXT* GuestContext, ARM64_NT_CONTEXT* NativeContext) {
   bool Cont {};
+  {
+    // The tracker can allocate with IntervalsLock held, see ResetToConsistentStateImpl
+    ScopedCallbackDisable guard;
+    Cont = FEX::Windows::HandleFaultSafeCopyFault(InvalidationTracker ? &*InvalidationTracker : nullptr, *Exception, NativeContext->Pc);
+  }
+  if (Cont) {
+    NtContinueNative(NativeContext, false);
+  }
+
   if (FEX::Windows::IsDataAccessViolation(*Exception)) {
     const auto FaultAddress = static_cast<uint64_t>(Exception->ExceptionInformation[1]);
 
@@ -1343,15 +1373,23 @@ void NotifyMemoryAlloc(void* Address, SIZE_T Size, ULONG Type, ULONG Prot, BOOL 
     return;
   }
 
-  NotifyAroundSyscall(
+  const bool CodeLockTaken = NotifyAroundSyscall(
     After,
     [&] { return InvalidationTracker->AllocTakesCodeAway(reinterpret_cast<uint64_t>(Address), static_cast<uint64_t>(Size), Type, Prot); },
-    [&](bool CodeLockHeld) {
+    [&](bool CodeLockHeld, bool Queued) {
       // Reserved memory can't be read, whatever its protection, and MEM_RESET(_UNDO) ignores the passed permissions
       if (!Status && (Type & MEM_COMMIT) && !(Type & (MEM_RESET | MEM_RESET_UNDO))) {
-        InvalidationTracker->HandleMemoryProtectionNotification(reinterpret_cast<uint64_t>(Address), static_cast<uint64_t>(Size), Prot, CodeLockHeld);
+        if (Queued) {
+          InvalidationTracker->HandleCrossProcessProtectNotification(reinterpret_cast<uint64_t>(Address), static_cast<uint64_t>(Size), Prot);
+        } else {
+          InvalidationTracker->HandleMemoryProtectionNotification(reinterpret_cast<uint64_t>(Address), static_cast<uint64_t>(Size), Prot,
+                                                                  CodeLockHeld);
+        }
       }
     });
+  if (CodeLockTaken) {
+    InvalidationTracker->UntrapForProtect(reinterpret_cast<uint64_t>(Address), static_cast<uint64_t>(Size));
+  }
 }
 
 void NotifyMemoryFree(void* Address, SIZE_T Size, ULONG FreeType, BOOL After, NTSTATUS Status) {
@@ -1361,7 +1399,7 @@ void NotifyMemoryFree(void* Address, SIZE_T Size, ULONG FreeType, BOOL After, NT
 
   NotifyAroundSyscall(
     After, [&] { return InvalidationTracker->FreeTakesCodeAway(reinterpret_cast<uint64_t>(Address), static_cast<uint64_t>(Size)); },
-    [&](bool CodeLockHeld) {
+    [&](bool CodeLockHeld, bool) {
       if (!Status) {
         InvalidationTracker->HandleMemoryFreeNotification(reinterpret_cast<uint64_t>(Address), static_cast<uint64_t>(Size), CodeLockHeld);
       }
@@ -1373,15 +1411,63 @@ void NotifyMemoryProtect(void* Address, SIZE_T Size, ULONG NewProt, BOOL After, 
     return;
   }
 
-  NotifyAroundSyscall(
+  const bool CodeLockTaken = NotifyAroundSyscall(
     After,
     [&] { return InvalidationTracker->ProtectTakesCodeAway(reinterpret_cast<uint64_t>(Address), static_cast<uint64_t>(Size), NewProt); },
-    [&](bool CodeLockHeld) {
-      if (!Status) {
+    [&](bool CodeLockHeld, bool Queued) {
+      if (Status) {
+        return;
+      }
+      if (Queued) {
+        InvalidationTracker->HandleCrossProcessProtectNotification(reinterpret_cast<uint64_t>(Address), static_cast<uint64_t>(Size), NewProt);
+      } else {
         InvalidationTracker->HandleMemoryProtectionNotification(reinterpret_cast<uint64_t>(Address), static_cast<uint64_t>(Size), NewProt,
                                                                 CodeLockHeld);
       }
     });
+  if (CodeLockTaken) {
+    InvalidationTracker->UntrapForProtect(reinterpret_cast<uint64_t>(Address), static_cast<uint64_t>(Size));
+  }
+}
+
+void __wine_fix_memory_info(MEMORY_BASIC_INFORMATION* Info) {
+  // Wine calls this once without a query, before ProcessInit, to say that it passes on every query this process makes of
+  // its own memory
+  if (!Info) {
+    WineFixesMemoryInfo = true;
+    return;
+  }
+  if (!InvalidationTracker || !GetCPUArea().ThreadState()) {
+    return;
+  }
+  InvalidationTracker->FixMemoryInfo(*Info);
+}
+
+// Wine calls this around NtWriteVirtualMemory into this process. The wineserver writes the memory, which faults on a page
+// FEX trapped, so the pages are made writable for the write, as for an untracked read, see BTCpu64NotifyReadFile. A
+// query reports such a page writable, so kernelbase's WriteProcessMemory doesn't protect it first. Wine also calls it
+// around the second try of NtReadVirtualMemory and NtQuerySystemInformation, whose unix side writes the buffer the same
+// way, after the first one failed with STATUS_ACCESS_VIOLATION.
+void __wine_notify_memory_write(void* Address, SIZE_T Size, BOOL After) {
+  auto* ThreadState = GetCPUArea().ThreadState();
+  if (!InvalidationTracker || !ThreadState || !Address || !Size) {
+    return;
+  }
+
+  auto* FrontendData = GetFrontendThreadData(ThreadState);
+  if (!After) {
+    if (!InvalidationTracker->MayBeTrapped(reinterpret_cast<uint64_t>(Address), static_cast<uint64_t>(Size))) {
+      return;
+    }
+    std::scoped_lock Lock(ThreadCreationMutex);
+    FrontendData->UntrackedReadAddress = reinterpret_cast<uint64_t>(Address);
+    FrontendData->UntrackedReadSize = static_cast<uint64_t>(Size);
+    FrontendData->InUntrackedRead = InvalidationTracker->BeginUntrackedWrite(FrontendData->UntrackedReadAddress, FrontendData->UntrackedReadSize);
+  } else if (FrontendData->InUntrackedRead) {
+    std::scoped_lock Lock(ThreadCreationMutex);
+    FrontendData->InUntrackedRead = false;
+    InvalidationTracker->EndUntrackedWrite(FrontendData->UntrackedReadAddress, FrontendData->UntrackedReadSize);
+  }
 }
 
 NTSTATUS NotifyMapViewOfSection(void* Unk1, void* Address, void* Unk2, SIZE_T Size, ULONG AllocType, ULONG Prot) {
@@ -1421,6 +1507,10 @@ void FlushInstructionCacheHeavy(const void* Address, SIZE_T Size) {
   }
 
   std::scoped_lock Lock(ThreadCreationMutex);
+  // Wine flushes everything without a range when it dropped queued work, see ProcessCrossProcessWork
+  if (!Address && !Size) {
+    InvalidationTracker->HandleCrossProcessWorkLost();
+  }
   InvalidationTracker->InvalidateAlignedInterval(reinterpret_cast<uint64_t>(Address), static_cast<uint64_t>(Size), false);
 }
 
@@ -1670,7 +1760,7 @@ NTSTATUS ThreadTerm(HANDLE Thread, LONG ExitCode) {
       Stopping->CurrentFrame->Pointers.ExitFunctionEC = reinterpret_cast<uintptr_t>(&ExitFunctionEC);
     }
 
-    // Terminated in the middle of an untracked read, see BTCpu64NotifyReadFile
+    // Terminated in the middle of an untracked read or memory write, see BTCpu64NotifyReadFile
     const auto* FrontendData = GetFrontendThreadData(CPUArea.ThreadState());
     if (FrontendData->InUntrackedRead) {
       InvalidationTracker->EndUntrackedWrite(FrontendData->UntrackedReadAddress, FrontendData->UntrackedReadSize);
