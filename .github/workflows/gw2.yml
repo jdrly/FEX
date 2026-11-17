@@ -59,6 +59,11 @@
 # have no Mac of my own for it. Xcode 27's clang isn't the engine's, so the .so files get the
 # structural gate. Going back is one edit: RUNNER and XCODE_VERSION below to the engine's values.
 # lint: actionlint (.github/actionlint.yaml names the xcode-27 label), the Python script compiles.
+# A push whose tree a green pull request run tested (the step "Whether a green pull request tested
+#   this tree", in build and in core) builds, compares and publishes as any push. In place of the
+#   test stage it runs Mach9's smoke program once under my FEX, and its core job builds, so the
+#   branch's ccache stays fresh, and runs no test. A push whose tree no such run tested runs
+#   everything (jdrly/gw2-on-mac#226).
 # publish: after the others are green, packs fex-arm64-<commit>.tar.xz and prints its sha256. For a
 #   push to gw2-on-mac it adds it to the pre-release arm64-builds, the one release this workflow
 #   makes, never marked latest, and keeps the 30 newest.
@@ -144,6 +149,11 @@ jobs:
     if: github.event_name != 'workflow_dispatch'
     runs-on: *runner
     timeout-minutes: 150
+    permissions:
+      contents: read
+      # to find the pull request whose run tested a pushed tree
+      actions: read
+      pull-requests: read
     # One build at a time in this repository, whatever the pull request or branch: a second one
     # waits, and nothing in progress is cancelled by it. GitHub keeps one waiting job per group, so
     # a third replaces the waiting one; with one push at a time (AGENTS.md) that doesn't happen.
@@ -182,6 +192,37 @@ jobs:
           echo "SO_GATE=$gate" >>"$GITHUB_ENV"
           echo "runner $RUNNER, Xcode $XCODE_VERSION (the engine's: $ENGINE_RUNNER, Xcode $ENGINE_XCODE_VERSION): the .so files get the $gate gate" |
             tee -a "$GITHUB_STEP_SUMMARY"
+      # A pull request runs every test. A push runs them too, unless a green pull request run
+      # tested the same tree: then the test stage is one smoke run and the core job only builds
+      # (jdrly/gw2-on-mac#226). A lookup that fails counts as "not tested". The core job
+      # runs the same step.
+      - &tested_tree
+        name: Whether a green pull request tested this tree
+        id: tested
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          green=0
+          if [[ $GITHUB_EVENT_NAME == push ]]; then
+            tree=$(gh api "repos/$GH_REPO/commits/$COMMIT" -q .commit.tree.sha) || tree=""
+            while read -r pr head; do
+              [[ -n $pr && -n $tree ]] || continue
+              [[ $(gh api "repos/$GH_REPO/commits/$head" -q .commit.tree.sha) == "$tree" ]] || continue
+              run=$(gh api "repos/$GH_REPO/actions/workflows/gw2.yml/runs?event=pull_request&status=success&head_sha=$head" \
+                -q '.workflow_runs[0].html_url // empty') || run=""
+              if [[ -n $run ]]; then
+                green=1
+                echo "pull request #$pr's green run tested this tree: $run" | tee -a "$GITHUB_STEP_SUMMARY"
+                break
+              fi
+            done < <(gh api "repos/$GH_REPO/commits/$COMMIT/pulls" -q '.[] | select(.merged_at != null) | "\(.number) \(.head.sha)"')
+            if (( !green )); then
+              echo "::warning::no green pull request run tested the tree of $COMMIT, so this push runs every test" |
+                tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+          echo "green=$green" >>"$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
@@ -475,7 +516,7 @@ jobs:
           "$m/wine/bin/wine" --version
       - name: Tests on the engine
         id: engine-tests
-        if: ${{ !cancelled() && steps.engines.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.engines.outcome == 'success' && steps.tested.outputs.green != '1' }}
         run: |
           mine=$(LC_ALL=C grep -aoE 'FEX-[0-9]+(\.[0-9]+)?-[0-9]+-g[0-9a-f]{7,}' dist/fex/aarch64-windows/libarm64ecfex.dll | sort -u)
           status=0
@@ -483,6 +524,14 @@ jobs:
             "$RUNNER_TEMP/engine-tests" "$BASE_VERSION" "$mine" >"$RUNNER_TEMP/engine-tests.md" || status=1
           tee -a "$GITHUB_STEP_SUMMARY" <"$RUNNER_TEMP/engine-tests.md"
           exit "$status"
+      # The lookup found a green pull request run on this tree, so the cases ran on it there. Here
+      # only that the files this push publishes load and translate: Mach9's smoke program under my
+      # FEX, as the stage's smoke-default runs it.
+      - name: Smoke (a push whose tree a pull request tested)
+        if: ${{ !cancelled() && steps.engines.outcome == 'success' && steps.tested.outputs.green == '1' }}
+        run: |
+          "$SRC/tests/gw2/run.zsh" "$RUNNER_TEMP/engine-mine/wine" "$RUNNER_TEMP/engine-tests/mine" smoke-default 40 \
+            'wine-build smoke test: x86_64 FEX cases passed' "$RUNNER_TEMP/tests/fex.exe" | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() && steps.engines.outcome == 'success' }}
         with:
@@ -520,6 +569,11 @@ jobs:
     if: github.event_name != 'workflow_dispatch'
     runs-on: *core_runner
     timeout-minutes: 150
+    permissions:
+      contents: read
+      # to find the pull request whose run tested a pushed tree
+      actions: read
+      pull-requests: read
     env:
       CC: clang
       CXX: clang++
@@ -527,6 +581,7 @@ jobs:
       CCACHE_MAXSIZE: 2G
       FEX_DISABLETELEMETRY: 1
     steps:
+      - *tested_tree
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.COMMIT }}
@@ -572,6 +627,7 @@ jobs:
       # whose own failures are on the list too), and a listing git then sees changed is one this
       # commit's JIT generates other code for.
       - name: Run them
+        if: steps.tested.outputs.green != '1'
         run: |
           out=$RUNNER_TEMP/core
           mkdir -p "$out"
@@ -626,6 +682,7 @@ jobs:
           fi
           exit "$status"
       - name: Against the reference list
+        if: steps.tested.outputs.green != '1'
         run: |
           out=$RUNNER_TEMP/core ref=tests/gw2/core-failures.txt
           {
@@ -655,7 +712,7 @@ jobs:
           } | tee -a "$GITHUB_STEP_SUMMARY"
           [[ -z $new ]]
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.tested.outputs.green != '1' }}
         with:
           name: core-failures-${{ env.COMMIT }}
           path: ${{ runner.temp }}/core
