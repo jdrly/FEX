@@ -62,11 +62,11 @@
 # have no Mac of my own for it. Xcode 27's clang isn't the engine's, so the .so files get the
 # structural gate. Going back is one edit: RUNNER and XCODE_VERSION below to the engine's values.
 # lint: actionlint (.github/actionlint.yaml names the xcode-27 label), the Python script compiles.
-# A push whose tree a green pull request run tested (the step "Whether a green pull request tested
-#   this tree", in build and in core) builds, compares and publishes as any push. In place of the
-#   test stage it runs Mach9's smoke program once under my FEX, and its core job builds, so the
-#   branch's ccache stays fresh, and runs no test. A push whose tree no such run tested runs
-#   everything (jdrly/gw2-on-mac#226).
+# A push whose tree a green pull request run tested, on a head that contains the push's parent (the
+#   step "Whether a green pull request tested this tree", in build and in core), builds, compares
+#   and publishes as any push. In place of the test stage it runs Mach9's smoke program once under
+#   my FEX, and its core job builds, so the branch's ccache stays fresh, and runs no test. Any other
+#   push runs everything (jdrly/gw2-on-mac#226, #242).
 # publish: after the others are green, packs fex-arm64-<commit>.tar.xz and prints its sha256. For a
 #   push to gw2-on-mac it adds it to the pre-release arm64-builds, the one release this workflow
 #   makes, never marked latest, and keeps the 30 newest.
@@ -197,8 +197,13 @@ jobs:
             tee -a "$GITHUB_STEP_SUMMARY"
       # A pull request runs every test. A push runs them too, unless a green pull request run
       # tested the same tree: then the test stage is one smoke run and the core job only builds
-      # (jdrly/gw2-on-mac#226). A lookup that fails counts as "not tested". The core job
-      # runs the same step.
+      # (jdrly/gw2-on-mac#226). A pull request's run builds the head's source, but takes this
+      # workflow and its scripts from GitHub's merge of the head into gw2-on-mac. So the tree alone
+      # isn't enough: gw2-on-mac can gain a commit and revert it while the pull request waits. The
+      # pushed commit's parent (gw2-on-mac before the push) also has to be an ancestor of the head.
+      # Then every gw2-on-mac the run could have merged was already in the head, and the run's
+      # workflow and scripts were the head's (jdrly/gw2-on-mac#242). A lookup that fails counts as
+      # "not tested". The core job runs the same step.
       - &tested_tree
         name: Whether a green pull request tested this tree
         id: tested
@@ -209,9 +214,11 @@ jobs:
           green=0
           if [[ $GITHUB_EVENT_NAME == push ]]; then
             tree=$(gh api "repos/$GH_REPO/commits/$COMMIT" -q .commit.tree.sha) || tree=""
+            parent=$(gh api "repos/$GH_REPO/commits/$COMMIT" -q '.parents[0].sha // empty') || parent=""
             while read -r pr head; do
-              [[ -n $pr && -n $tree ]] || continue
+              [[ -n $pr && -n $tree && -n $parent ]] || continue
               [[ $(gh api "repos/$GH_REPO/commits/$head" -q .commit.tree.sha) == "$tree" ]] || continue
+              [[ $(gh api "repos/$GH_REPO/compare/$parent...$head" -q .status) == ahead ]] || continue
               run=$(gh api "repos/$GH_REPO/actions/workflows/gw2.yml/runs?event=pull_request&status=success&head_sha=$head" \
                 -q '.workflow_runs[0].html_url // empty') || run=""
               if [[ -n $run ]]; then
