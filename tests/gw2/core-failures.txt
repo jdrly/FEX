@@ -33,3 +33,8 @@ instcountci InstCountCI/Test_Secondary_32Bit.json.instcountci
 instcountci InstCountCI/Test_VEX_map2.json.instcountci
 instcountci InstCountCI/Test_x87.json.instcountci
 instcountci InstCountCI/Test_x87_f64.json.instcountci
+instcountci-numbers unittests/InstructionCountCI/FlagM/x87-Crysis2Max-fmodel.json
+instcountci-numbers unittests/InstructionCountCI/FlagM/x87-HalfLife.json
+instcountci-numbers unittests/InstructionCountCI/FlagM/x87-Oblivion.json
+instcountci-numbers unittests/InstructionCountCI/FlagM/x87-Psychonauts.json
+instcountci-numbers unittests/InstructionCountCI/x87_f64_32Bit.json

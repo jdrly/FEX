@@ -27,6 +27,9 @@ changed has to be the baseline's, from the same run and toolchain.
   and dev builds fetch it by commit.
 - FEX's own core tests can't run on macOS. They run on `ubuntu-24.04-arm`, where the same 35 fail at
   the engine's commit (18 asm of 7,689, 17 InstCountCI of 108). That list is the reference.
+  2026-11-17, Mach9 0.4.0's `597e7ccbedd`: the same 18 asm (of 7,695) and 17 InstCountCI (of 110),
+  and five x87 listings whose numbers athei's `ddf3ea74f` changed without updating them, 40 lines
+  (jdrly/FEX run 44191738763, jdrly/gw2-on-mac#260).
 
 ## Alternatives I rejected
 
