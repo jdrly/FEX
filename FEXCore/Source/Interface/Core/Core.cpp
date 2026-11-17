@@ -1122,9 +1122,9 @@ ContextImpl::TryCompileBlock(FEXCore::Core::InternalThreadState* Thread, uint64_
 
   // GW2 on Mac (jdrly/gw2-on-mac#165), EntryCompileLock: threads running the same code miss on the same entry at the same
   // time, and each would compile its own copy into the shared code buffer. Take turns per entry, and look again once it's
-  // this thread's turn. It is taken inside the invalidation guard above and dropped before it, so whatever takes
-  // CodeInvalidationMutex exclusively (an invalidation, a fork) never runs while one is held. From FEX-Emu/FEX pull
-  // request 6081:
+  // this thread's turn. It is taken inside CompileBlock's invalidation guard and dropped before it, once per attempt, so
+  // whatever takes CodeInvalidationMutex exclusively (an invalidation, a fork) never runs while one is held. From
+  // FEX-Emu/FEX pull request 6081:
   // https://github.com/FEX-Emu/FEX/commit/61663da5bc8391130e4d3fdf0797f0ff9fe44161
   std::unique_lock<FEXCore::Utils::WritePriorityMutex::Mutex> EntryCompileLock;
   if (Config.EntryCompileLock()) {
