@@ -41,7 +41,10 @@ launcher=(-DCMAKE_C_COMPILER_LAUNCHER="$ccache" -DCMAKE_CXX_COMPILER_LAUNCHER="$
 
 checkout() {
   git -C "$SRC" checkout --quiet --detach "$1"
-  git -C "$SRC" submodule update --init --recursive
+  # one commit of each, eight at a time: the full histories took 86 to 97 s of every run
+  # (jdrly/gw2-on-mac#231). GitHub serves a commit by its id, so a recorded commit that isn't a
+  # branch's tip still comes.
+  git -C "$SRC" submodule update --init --recursive --depth 1 --jobs 8
   # a leading '+', '-' or 'U': a submodule not at the recorded commit, not checked out, or in conflict
   if git -C "$SRC" submodule status --recursive | grep '^[-+U]'; then
     print -u2 "::error::the submodules aren't at $1's commits"
