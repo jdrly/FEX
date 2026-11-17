@@ -31,6 +31,9 @@
 # <engines> is both, engine or mine. Logs are <work dir>/<engine>/<label>.log, fexstats's output
 # <label>.reader.<n>. Within cases.zsh, $prefix is that directory and $which the engine (engine or
 # mine). Prints a Markdown summary; exits 1 when a check or stats case failed.
+#
+# With GW2_LANE=long or GW2_LANE=short in the environment it runs a part of the cases, so the
+# workflow can run two of these side by side (see "lane" below). Unset, it runs every case.
 emulate -L zsh
 setopt err_exit pipe_fail no_unset extended_glob
 
@@ -41,20 +44,40 @@ typeset -a report_labels
 tests=${3:A} work=${4:A}
 here=${0:A:h}
 integer failed=0
+# GW2_LANE: unset, every case in this one process, as before. "long", only my FEX's cases of the
+# programs in long_programs, in the prefix <work dir>/mine-long, plus the cases in both_lanes,
+# whose answers their checks read. "short", every other case. The workflow runs the two side by
+# side, each with a copy of my engine of its own: run.zsh tells a run's processes by the engine
+# they run from.
+lane=${GW2_LANE:-all}
+[[ $lane == (all|long|short) ]] || { print -u2 "engine.zsh: GW2_LANE is long or short, or unset"; exit 2 }
+long_programs=(counters.exe codebuf.exe)
+both_lanes=(smoke-log hardware-tso)
+# the labels of the check and stats cases this process ran, for the checks in cases.zsh
+typeset -A ran
 
 applies() { [[ $1 == both || $1 == "$which" ]] }
+
+# in_lane <label> [<program>]: whether this process's lane runs that case
+in_lane() {
+  [[ $lane == all ]] && return 0
+  (( ${both_lanes[(I)$1]} )) && return 0
+  if (( ${long_programs[(I)${2:-}]} )); then [[ $lane == long ]]; else [[ $lane == short ]]; fi
+}
 
 check() {
   local label=$1 engines=$2 secs=$3 program=$4 line=$5
   shift 5
-  applies $engines || return 0
+  applies $engines && in_lane $label $program || return 0
+  ran[$label]=1
   "$here/run.zsh" "$wine" "$prefix" "$label" "$secs" "$line" "$tests/$program" "$@" || failed+=1
 }
 
 stats() {
   local label=$1 engines=$2 secs=$3 program=$4 line=$5 pattern=${6//\{version\}/$versions[$which]}
   shift 6
-  applies $engines || return 0
+  applies $engines && in_lane $label $program || return 0
+  ran[$label]=1
   GW2_TEST_READER="$tests/fexstats ${GW2_STATS_OPTIONS:-}" "$here/run.zsh" "$wine" "$prefix" "$label" "$secs" "$line" \
     "$tests/$program" "$@" FEX_PROFILESTATS=1 || failed+=1
   local files=($prefix/$label.reader.<->(Nn)) f
@@ -79,6 +102,7 @@ version() {
 
 report() {
   local label=$1 of=$2 pattern=$3 answer=no
+  in_lane $label || return 0
   local lines=(${(f)"$(tr -d '\r' <"$prefix/$of.log")"})
   (( ${lines[(I)$~pattern]} )) && answer=yes
   print -- $answer >"$prefix/$label"
@@ -87,16 +111,20 @@ report() {
   print "      $label: $answer"
 }
 
-for which in engine mine; do
+passes=(engine mine) note=
+if [[ $lane == long ]]; then passes=(mine) note=", the long cases"; fi
+for which in $passes; do
+  ran=()
   wine=$wines[$which] prefix=$work/$which
+  [[ $lane != long ]] || prefix=$work/$which-long
   mkdir -p "$prefix"
-  print "### Under $names[$which]\n"
+  print "### Under $names[$which]$note\n"
   print '```'
   source "$here/cases.zsh"
   print '```\n'
 done
 
-if (( ${#report_labels} )); then
+if (( ${#report_labels} )) && [[ $lane != long ]]; then
   print "### Reports\n"
   print "| | the engine's FEX | my FEX |"
   print "|---|---|---|"
