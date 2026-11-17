@@ -148,7 +148,7 @@ jobs:
     name: Build my FEX for the arm64 engine
     if: github.event_name != 'workflow_dispatch'
     runs-on: *runner
-    timeout-minutes: 150
+    timeout-minutes: 45
     permissions:
       contents: read
       # to find the pull request whose run tested a pushed tree
@@ -568,7 +568,7 @@ jobs:
     name: FEX's own tests (arm64 Linux)
     if: github.event_name != 'workflow_dispatch'
     runs-on: *core_runner
-    timeout-minutes: 150
+    timeout-minutes: 30
     permissions:
       contents: read
       # to find the pull request whose run tested a pushed tree
@@ -633,11 +633,13 @@ jobs:
           mkdir -p "$out"
           : >"$out/totals"
           status=0
+          # 60 s a test: the slowest takes 10 s. At 302 s, 45 hung tests held run 43452320908 for
+          # an hour (jdrly/gw2-on-mac#233).
           suite() {
             local name=$1 regex=$2 rc=0 total failed
             shift 2
             rm -f build/Testing/Temporary/LastTestsFailed.log
-            (cd build && env "$@" ctest --no-tests=error --output-on-failure --timeout 302 -j"$(nproc)" -R "$regex" >"$out/$name.log" 2>&1) || rc=$?
+            (cd build && env "$@" ctest --no-tests=error --output-on-failure --timeout 60 -j"$(nproc)" -R "$regex" >"$out/$name.log" 2>&1) || rc=$?
             total=$(grep -oE '[0-9]+ tests? failed out of [0-9]+' "$out/$name.log" | tail -n 1 || true)
             echo "$name: ctest exit $rc, ${total:-no total}" | tee -a "$out/totals"
             sed -n 's/^[0-9]*:/'"$name"' /p' build/Testing/Temporary/LastTestsFailed.log 2>/dev/null >"$out/$name.failed" || true

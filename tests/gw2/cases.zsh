@@ -145,14 +145,14 @@ for mb in 16 128; do
 done
 
 # The watchdog's samples (jdrly/gw2-on-mac#132). hang.exe prints one line and sleeps for good, so
-# run.zsh has to fail it at its 20-second limit and leave <label>.hang.<pid>.log for each Wine
+# run.zsh has to fail it at its 10-second limit and leave <label>.hang.<pid>.log for each Wine
 # process of the run. It passes only when hang.exe got to its sleep and the sample of hang.exe itself
 # (the case's program, or a command naming hang.exe) has frames: "(in <image>)" from sample,
 # "frame #" from lldb. The lines under it name each sample and which tool gave it.
 hang_check() {
   local out f head rc=0 files tools=() program=no slept=no
   integer stacks=0
-  out=$("$here/run.zsh" "$wine" "$prefix" hang 20 'gw2 test hang: never' "$tests/hang.exe" 2>&1) || rc=$?
+  out=$("$here/run.zsh" "$wine" "$prefix" hang 10 'gw2 test hang: never' "$tests/hang.exe" 2>&1) || rc=$?
   [[ -f $prefix/hang.log ]] && tr -d '\r' <"$prefix/hang.log" | grep -xF 'gw2 test hang: sleeping' >/dev/null && slept=yes
   files=($prefix/hang.hang.<->.log(Nn))
   for f in $files; do
