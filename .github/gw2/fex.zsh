@@ -1,7 +1,8 @@
 #!/bin/zsh
-# gw2 (jdrly/gw2-on-mac#109): build FEX's four files the way Mach9 0.3.1's CI built the engine's
-# (athei/mach9 at v0.3.1: bin/build-fex.sh, bin/lib/profile.sh, bin/build-wine.sh, the strip in
-# bin/bundle-wine.sh; the log of the run that compiled them is athei/mach9 run 42746773278).
+# gw2 (jdrly/gw2-on-mac#109): build FEX's four files the way Mach9 0.4.0's CI built the engine's
+# (athei/mach9 at v0.4.0: bin/build-fex.sh, bin/lib/profile.sh, bin/build-wine.sh, the strip in
+# bin/bundle-wine.sh; the log of the run that compiled them is athei/mach9 run 43865773931). Their
+# FEX build is 0.3.1's: v0.4.0 only lets FEX_REF override fex-src.ref.
 #
 #   fex.zsh checkout <commit>       move $SRC to <commit>, every submodule at its recorded commit
 #   fex.zsh build <dist> [<version>] configure and build the three trees in $BUILD, install each

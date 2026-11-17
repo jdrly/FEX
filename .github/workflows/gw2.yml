@@ -120,26 +120,27 @@ env:
   # GitHub's merge commit (github.sha), so the workflow and the scripts it calls always agree. The
   # source under test stays $COMMIT.
   GW2: ${{ github.workspace }}/gw2-ci/.github/gw2
-  # athei/FEX's commit Mach9 0.3.1 was built from (the tag engine-0.3.1), where gw2-on-mac starts,
+  # athei/FEX's commit Mach9 0.4.0 was built from (the tag engine-0.4.0), where gw2-on-mac starts,
   # and what git describe says there with athei's tags
-  BASE_COMMIT: 9d4fa4b46b1d8d834462a540539f37528883eec4
-  BASE_VERSION: FEX-2610-215-g9d4fa4b
+  BASE_COMMIT: 597e7ccbedd2b88a19c575bbad2538da447e6c3d
+  BASE_VERSION: FEX-2610-226-g597e7cc
   # The runner and Xcode my build uses, the build job's runs-on through the anchor. With the
   # engine's two below, the .so files get the strict gate; with any other, the structural one.
   RUNNER: &runner xcode-27
   XCODE_VERSION: "27.2"
-  # What Mach9's run that compiled the engine's FEX used (athei/mach9 run 42746773278): Xcode 26.6
+  # What Mach9's run that compiled the engine's FEX used (athei/mach9 run 43865773931; v0.4.0's
+  # release run 44031759609 took that FEX from its cache): Xcode 26.6
   # (SDK 26.5, clang-2100.1.1.101) on the macos-26 image (macos-26-arm64 20261102.0473.1), and its
   # pins/redist.env
   ENGINE_RUNNER: macos-26
   ENGINE_XCODE_VERSION: "26.6"
   LLVM_MINGW_VERSION: "20261104"
   LLVM_MINGW_SHA256: 66cbd5178c4a71b0d473e68ede172f8eb7d15d023e67f39201d0a69e21f6bf3c
-  MACH9_VERSION: v0.3.1
-  MACH9_SHA256: 90aff9a897ed0ff9aac44d0e06f0aecd3ee985afb38037f3f915451e51fa974e
-  # athei/mach9's v0.3.1, and its smoke/fex.c there, for the test stage
-  MACH9_COMMIT: 39f186e88de52e1960341d9939e5bf5ebb2a889d
-  FEX_SMOKE_SHA256: 27a145e176307c8f26101d1089135c7ca9bb04107bd273de37de16e02ca9d99a
+  MACH9_VERSION: v0.4.0
+  MACH9_SHA256: 3b81aac9b93d5652872673b400769ec525f3bc2f1f7e2ec82c9f851d0a0db05d
+  # athei/mach9's v0.4.0, and its smoke/fex.c there, for the test stage
+  MACH9_COMMIT: cc71942acedec93aa48c98fcdba73ddf0f383399
+  FEX_SMOKE_SHA256: 42352991f5867f9c401d12a7352c7fd3579cd35815843379b88c0d2985ca59ac
   CORE_RUNNER: &core_runner ubuntu-24.04-arm
 
 defaults:
@@ -463,7 +464,7 @@ jobs:
             echo "commit: $COMMIT"
             echo "switches:${switches:+ $switches}"
             grep '^baseline: ' "$RUNNER_TEMP/baseline.md"
-            echo "base: $BASE_COMMIT ($BASE_VERSION, athei/FEX, the tag engine-0.3.1)"
+            echo "base: $BASE_COMMIT ($BASE_VERSION, athei/FEX, the tag engine-${MACH9_VERSION#v})"
             echo "engine: Mach9 $MACH9_VERSION (wine-$MACH9_VERSION-macos-arm64.tar.xz, sha256 $MACH9_SHA256)"
             echo "toolchain: $RUNNER ($ImageOS $ImageVersion), Xcode $(xcodebuild -version | sed -n 's/^Xcode //p') (macOS SDK $(xcrun -sdk macosx --show-sdk-version)), $(/usr/bin/clang --version | sed -n 1p), llvm-mingw $LLVM_MINGW_VERSION ($("$MINGW_DIR/bin/clang" --version | sed -n 1p)), $(cmake --version | sed -n 1p), ninja $(ninja --version), macOS 26.4"
             for f in aarch64-windows/libarm64ecfex.dll aarch64-windows/libwow64fex.dll aarch64-unix/libarm64ecfex.so aarch64-unix/libwow64fex.so; do
