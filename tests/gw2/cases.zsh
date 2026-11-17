@@ -57,6 +57,7 @@ verdict() {
 # pattern, <l1 resizes> being a zsh pattern for the main thread's L1 resizes in phase 3
 counters_check() {
   local label=$1 l1=$2 main tid r exits traps moves resizes log=()
+  (( ${+ran[$label]} )) || return 0
   [[ -f $prefix/$label.log ]] && log=(${(f)"$(tr -d '\r' <"$prefix/$label.log")"})
   main=${${(M)log:#gw2 test counters: tid *}##* }
   local workers=(${=${(M)log:#gw2 test counters: workers *}#gw2 test counters: workers})
@@ -106,6 +107,7 @@ codebuf() {
   shift 3
   applies $engines || return 0
   stats $label $engines 600 codebuf.exe 'codebuf: passed' 'thread <->: *jit_count=<->*' "$@"
+  (( ${+ran[$label]} )) || return 0
   python3 -I "$here/codebuf_check.py" $mode "$prefix/$label.log" "$prefix/$label.reader.1" "$prefix/$label.reader.2" ||
     failed+=1
 }
@@ -123,6 +125,7 @@ codebuf codebuf-invalid invalid mine FEX_INITIALCODEBUFFERMB=100 FEX_SILENTLOG=0
 slots_check() {
   local label=$1 tid r log=()
   integer missing=0 quiet=0
+  (( ${+ran[$label]} )) || return 0
   [[ -f $prefix/$label.log ]] && log=(${(f)"$(tr -d '\r' <"$prefix/$label.log")"})
   local counting=(${=${(M)log:#gw2 test slots: counting *}#gw2 test slots: counting})
   local waiting=(${=${(M)log:#gw2 test slots: waiting *}#gw2 test slots: waiting})
@@ -152,6 +155,7 @@ done
 hang_check() {
   local out f head rc=0 files tools=() program=no slept=no
   integer stacks=0
+  in_lane hang hang.exe || return 0
   out=$("$here/run.zsh" "$wine" "$prefix" hang 10 'gw2 test hang: never' "$tests/hang.exe" 2>&1) || rc=$?
   [[ -f $prefix/hang.log ]] && tr -d '\r' <"$prefix/hang.log" | grep -xF 'gw2 test hang: sleeping' >/dev/null && slept=yes
   files=($prefix/hang.hang.<->.log(Nn))
@@ -200,6 +204,7 @@ tso_field=tso_switches tsocalls_iterations=100000
 tsocalls_traps() {
   [[ $which == mine ]] || return 0
   local label=$1 mode=$2 hw=no keep=no loop line tid traps want ok=1 said=()
+  (( ${+ran[$label]} )) || return 0
   [[ -f $prefix/hardware-tso ]] && hw=$(<$prefix/hardware-tso)
   [[ -f $prefix/tso-keep ]] && keep=$(<$prefix/tso-keep)
   local reads=($prefix/$label.reader.<->(Nn))
@@ -255,6 +260,7 @@ tsocalls_traps tsocalls-keep keep
 # FEX doesn't know the switch, and l1_hits is padding in its slots.
 l1lookup_check() {
   local label=$1 mode=$2 main calls hits exits r log=()
+  (( ${+ran[$label]} )) || return 0
   [[ -f $prefix/$label.log ]] && log=(${(f)"$(tr -d '\r' <"$prefix/$label.log")"})
   main=${${(M)log:#gw2 test l1lookup: tid *}##* }
   calls=${${(M)log:#gw2 test l1lookup: calls *}##* }
@@ -295,6 +301,7 @@ check smoke-l1lookup-smcchecks-full mine 160 fex.exe "$smoke" FEX_DISPATCHERL1LO
 crash_check() {
   local label=${1:-crash} out rc=0 crashed=no backtrace=no
   (( $# )) && shift
+  in_lane $label crash.exe || return 0
   integer start=$SECONDS took
   out=$("$here/run.zsh" "$wine" "$prefix" $label 60 'gw2 test crash: never' "$tests/crash.exe" "$@" 2>&1) || rc=$?
   took=$(( SECONDS - start ))
@@ -354,6 +361,7 @@ if [[ $which == mine ]]; then counters_check counters-lookup '<1->'; fi
 compilelock_check() {
   local label=$1 mode=$2 tid d r functions log=()
   integer sum=0 missing=0
+  (( ${+ran[$label]} )) || return 0
   [[ -f $prefix/$label.log ]] && log=(${(f)"$(tr -d '\r' <"$prefix/$label.log")"})
   local workers=(${=${(M)log:#gw2 test compilelock: workers *}#gw2 test compilelock: workers})
   functions=${${(M)log:#gw2 test compilelock: functions *}##* }
