@@ -1,11 +1,11 @@
 # Every change to what FEX does is an option that is off in the fork, and dev builds turn it on
 
-Decided 2026-11-12, narrowed 2026-11-15. Status: accepted.
+Decided 2026-11-12, narrowed 2026-11-15 and 2026-11-19 (ADR 0008). Status: accepted.
 
 My FEX replaces the engine's for every x86_64 process, Steam and the launcher included. A change to
 what FEX does therefore sits behind a `FEX_*` option that is off by default. It is an entry in
 `FEXCore/Source/Interface/Config/Config.json.in`, so a rule in my app can set it for one program.
-With nothing set, the fork behaves as the engine's FEX. My dev builds turn the options on for
+Until an option wins in play, it stays off. Then it becomes the default (ADR 0008). My dev builds turn the options on for
 `Gw2-64.exe` from `dev-switches.conf`, because I debug from everything on backwards. A release build
 keeps the fork's defaults.
 
@@ -22,13 +22,14 @@ keeps the fork's defaults.
   in the game. I asked why we were adding something that costs frames. A fix that adds work on the
   hot path waits for a symptom seen in play. The rule is in the app's ADR on dev builds.
 - `FEX_ENTRYHEADERLOOKUP` is never on together with my Wine fork's sampler. The sampler attributes a
-  sample by the block header that this option stops storing.
+  sample by the block header that this option stops storing. Since it is on by default (ADR 0008), a
+  sampler session sets it to 0.
 - Played results so far: `FEX_DISPATCHERL1LOOKUP` and `FEX_ENTRYHEADERLOOKUP` together are worth
   about 1 fps at equal draws in every busy band and stay on. The code generation cuts, the compile
   lock and hidden AVX together added about 3 to 4 fps on dev.17. `FEX_HOSTFEATURES=enableafp` ran
   about 3 fps worse in the busy bands and is not set.
-- No option has become a default yet. Under my DXMT fork's rule a tested option either goes or
-  becomes the default, and I haven't applied that rule here.
+- `FEX_DISPATCHERL1LOOKUP` and `FEX_ENTRYHEADERLOOKUP` became the defaults on 2026-11-19, under my
+  DXMT fork's rule that a tested option either goes or becomes the default (ADR 0008).
 
 ## Alternatives I rejected
 

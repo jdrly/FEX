@@ -45,15 +45,17 @@
 #   tests/gw2/gw2test.h when the reader has to look at it) and one line in tests/gw2/cases.zsh:
 #   check (a line it has to print), stats (the same, plus a pattern the reader's last read has to
 #   match) or report (a yes or no from a case's log). engine.zsh's header says how each works.
-# core: FEX's own tests on GitHub's arm64 Linux runner ($CORE_RUNNER), FEX built natively: the
+# core: FEX's own tests on GitHub's arm64 Linux runner ($CORE_RUNNER), FEX built natively, with
+#   FEX_DISPATCHERL1LOOKUP and FEX_ENTRYHEADERLOOKUP on, their default (jdrly/gw2-on-mac#266): the
 #   assembly tests (unittests/ASM, unittests/32Bit_ASM) with FEX_HOSTFEATURES=disablesve,disableafp,
 #   since that host has SVE and my Mac doesn't, the assembly tests again with
-#   FEX_DISPATCHERL1LOOKUP=1, whose failures have to be the first pass's, and the instruction count tests
+#   FEX_DISPATCHERL1LOOKUP=0, whose failures have to be the first pass's, and the instruction count tests
 #   (unittests/InstructionCountCI), with each listing whose numbers this commit's JIT changes. The
-#   assembly and instruction count tests run once more with FEX_ENTRYHEADERLOOKUP=1
+#   assembly and instruction count tests run once more with FEX_ENTRYHEADERLOOKUP=0
 #   (jdrly/gw2-on-mac#162), and a block's entry, as CodeSizeValidation measures it, has to be two
-#   instructions shorter with it. The assembly tests run once more with that and #164's two
-#   switches on (FEX_LEA32BITADDS, FEX_SIGNEXTENDINGLOADS), as a dev build of my app runs them.
+#   instructions shorter with it at 1 than at 0, and unset the same as at 1. The assembly tests run
+#   once more with #164's two switches on (FEX_LEA32BITADDS, FEX_SIGNEXTENDINGLOADS), as a dev build
+#   of my app runs them.
 #   FEX_CONDBACKEDGESUSPEND (#169) changes only what the JIT emits on Windows: on Linux the code is
 #   the same with it on and off, so the core job doesn't run with it. The failures are compared with tests/gw2/core-failures.txt, the
 #   engine's commit's, whose lines count for the runs with the options too: a test that isn't on
@@ -75,8 +77,8 @@
 #   (jdrly/gw2-on-mac#132). It builds nothing of FEX: it takes the build of my FEX that a push
 #   published (fex-arm64-<commit>.tar.xz on arm64-builds) or, failing that, the artifact a pull
 #   request's run left (kept 7 days). tests/gw2/stress.zsh starts counters.exe and Mach9's smoke
-#   program under the engine's FEX, under mine, under mine with FEX_ENTRYHEADERLOOKUP=1 and under
-#   mine with FEX_ENTRYCOMPILELOCK=1 and both lookups on, with FEX_DYNAMICL1CACHE unset and at 0,
+#   program under the engine's FEX, under mine (both lookups on, the default), under mine with
+#   both lookups at 0 and under mine with FEX_ENTRYCOMPILELOCK=1, with FEX_DYNAMICL1CACHE unset and at 0,
 #   for <rounds> rounds (5 unless the run says otherwise). Its time limits come from
 #   stress.zsh --budget <rounds>: the seconds after which no run starts are
 #   <rounds> times a round's planned time plus the prefixes, the step gets one longest run and a
@@ -679,36 +681,43 @@ jobs:
               status=1
             fi
           }
+          # my two lookups are on by default (jdrly/gw2-on-mac#266), so this pass runs with both
           suite asm '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp
-          # the same with the dispatcher's L1 lookup on (jdrly/gw2-on-mac#161): every entry of the
+          # the same with the dispatcher's L1 lookup off (jdrly/gw2-on-mac#161): every entry of the
           # harness goes through the dispatcher, and the switch may change no test's result, so its
           # failures have to be the ones above. Kept out of the reference comparison as a .list.
-          suite asm-l1lookup '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_DISPATCHERL1LOOKUP=1
-          mv "$out/asm-l1lookup.failed" "$out/asm-l1lookup.list"
-          if ! diff <(sed 's/^asm-l1lookup /asm /' "$out/asm-l1lookup.list" | LC_ALL=C sort) <(LC_ALL=C sort "$out/asm.failed") >"$out/asm-l1lookup.diff"; then
-            echo "::error::the asm tests fail differently with FEX_DISPATCHERL1LOOKUP=1 (< with it, > without)"
-            cat "$out/asm-l1lookup.diff"
+          suite asm-l1lookup-off '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_DISPATCHERL1LOOKUP=0
+          mv "$out/asm-l1lookup-off.failed" "$out/asm-l1lookup-off.list"
+          if ! diff <(sed 's/^asm-l1lookup-off /asm /' "$out/asm-l1lookup-off.list" | LC_ALL=C sort) <(LC_ALL=C sort "$out/asm.failed") >"$out/asm-l1lookup-off.diff"; then
+            echo "::error::the asm tests fail differently with FEX_DISPATCHERL1LOOKUP=0 (< with it, > the default)"
+            cat "$out/asm-l1lookup-off.diff"
             status=1
           fi
-          suite asm-lookup '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_ENTRYHEADERLOOKUP=1
-          # #164's two switches with the lookup, as a dev build of my app runs them
-          suite asm-cuts '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_ENTRYHEADERLOOKUP=1 \
-            FEX_LEA32BITADDS=1 FEX_SIGNEXTENDINGLOADS=1
+          suite asm-lookup-off '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_ENTRYHEADERLOOKUP=0
+          # #164's two switches with the lookups, as a dev build of my app runs them
+          suite asm-cuts '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_LEA32BITADDS=1 FEX_SIGNEXTENDINGLOADS=1
           suite instcountci 'InstCountCI/.*\.instcountci$'
           suite instcountci-update 'InstCountCI/.*new_numbers$'
           git diff --name-only -- unittests/InstructionCountCI | sed 's/^/instcountci-numbers /' >"$out/instcountci-numbers.failed"
           # after the diff: this run writes the new numbers files too
-          suite instcountci-lookup 'InstCountCI/.*\.instcountci$' FEX_ENTRYHEADERLOOKUP=1
+          suite instcountci-lookup-off 'InstCountCI/.*\.instcountci$' FEX_ENTRYHEADERLOOKUP=0
           LC_ALL=C sort "$out"/*.failed >"$out/failures"
-          # a block's entry, from CodeSizeValidation's NOP block, with FEX_ENTRYHEADERLOOKUP off and on
-          for v in 0 1; do
-            FEX_ENTRYHEADERLOOKUP=$v build/Bin/CodeSizeValidation build/unittests/InstructionCountCI/Primary.json.instcountci 2>&1 |
+          # a block's entry, from CodeSizeValidation's NOP block, with FEX_ENTRYHEADERLOOKUP off, on
+          # and unset, which has to be on
+          for v in 0 1 unset; do
+            if [[ $v == unset ]]; then vars=(-u FEX_ENTRYHEADERLOOKUP); else vars=("FEX_ENTRYHEADERLOOKUP=$v"); fi
+            env "${vars[@]}" build/Bin/CodeSizeValidation build/unittests/InstructionCountCI/Primary.json.instcountci 2>&1 |
               grep -m 1 '^Block entry: ' >"$out/entry-$v" || true
             echo "FEX_ENTRYHEADERLOOKUP=$v: $(cat "$out/entry-$v")" | tee -a "$out/totals"
           done
           off=$(sed -n 's/^Block entry: \([0-9]*\) .*/\1/p' "$out/entry-0") on=$(sed -n 's/^Block entry: \([0-9]*\) .*/\1/p' "$out/entry-1")
+          default=$(sed -n 's/^Block entry: \([0-9]*\) .*/\1/p' "$out/entry-unset")
           if [[ -z $off || -z $on ]] || (( on != off - 2 )); then
             echo "::error::a block's entry has to be two instructions shorter with FEX_ENTRYHEADERLOOKUP=1: ${off:-none} off, ${on:-none} on"
+            status=1
+          fi
+          if [[ -z $default || $default != "$on" ]]; then
+            echo "::error::FEX_ENTRYHEADERLOOKUP unset has to be on: ${default:-none} unset, ${on:-none} on"
             status=1
           fi
           exit "$status"
@@ -728,15 +737,15 @@ jobs:
             echo "::error::no reference list $ref yet"
             exit 1
           fi
-          # the suites run again with FEX_ENTRYHEADERLOOKUP=1, and with #164's switches too, have the
-          # same reference as without them
-          LC_ALL=C sort "$ref" <(sed -n 's/^asm /asm-lookup /p; s/^instcountci /instcountci-lookup /p' "$ref") \
+          # the suites run again with FEX_ENTRYHEADERLOOKUP=0, and with #164's switches, have the
+          # same reference as the default runs
+          LC_ALL=C sort "$ref" <(sed -n 's/^asm /asm-lookup-off /p; s/^instcountci /instcountci-lookup-off /p' "$ref") \
             <(sed -n 's/^asm /asm-cuts /p' "$ref") >"$out/reference"
           new=$(LC_ALL=C comm -23 "$out/failures" "$out/reference")
           fixed=$(LC_ALL=C comm -13 "$out/failures" "$out/reference")
           {
             if [[ -z $new && -z $fixed ]]; then
-              echo "- the same $(grep -c . "$out/reference" || true) failures as $ref, its asm and instcountci lines also for the runs with FEX_ENTRYHEADERLOOKUP=1, its asm lines also for the run with #164's switches"
+              echo "- the same $(grep -c . "$out/reference" || true) failures as $ref, its asm and instcountci lines also for the runs with FEX_ENTRYHEADERLOOKUP=0, its asm lines also for the run with #164's switches"
             fi
             [[ -z $fixed ]] || { echo "- on the reference list and passing now:"; echo '```'; echo "$fixed"; echo '```'; }
             [[ -z $new ]] || { echo "- **failing and not on the reference list:**"; echo '```'; echo "$new"; echo '```'; }

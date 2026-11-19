@@ -17,3 +17,4 @@ next free number.
 | [`0005-the-project-rules-that-bind-this-fork.md`](0005-the-project-rules-that-bind-this-fork.md) | recorded 2026-11-17 | The project-wide rules in a sentence each, pointing to the workspace ADRs. |
 | [`0006-a-hung-test-costs-a-minute-and-no-job-runs-past-45-minutes.md`](0006-a-hung-test-costs-a-minute-and-no-job-runs-past-45-minutes.md) | 2026-11-17 | A hung test is cut off after a minute, and no job runs past 45 minutes. |
 | [`0007-the-test-stage-runs-in-two-lanes-inside-its-one-macos-job.md`](0007-the-test-stage-runs-in-two-lanes-inside-its-one-macos-job.md) | 2026-11-17 | The cases of `counters.exe` and `codebuf.exe` run in a lane of their own, beside the others, in the one macOS job. |
+| [`0008-an-option-that-won-in-play-becomes-the-default.md`](0008-an-option-that-won-in-play-becomes-the-default.md) | 2026-11-19 | An option that won in play becomes the fork's default and keeps its off value. The two lookups are the first. |
