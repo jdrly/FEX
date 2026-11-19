@@ -20,7 +20,8 @@
 #       <label>.reader.1, .2 and so on. One line of the last read has to match <pattern>, a zsh
 #       pattern in which {version} stands for the version of the FEX that should be running. A
 #       read fails the case when fexstats can't read the slots (another layout: exit 3). A case
-#       that compares reads with each other can read the files itself after its stats line.
+#       that compares reads with each other can read the files itself after its stats line. The
+#       summary shows each read's first 20 lines; the files are in the engine-tests artifact.
 #   version <label> <engines> <seconds> <program> <line> [<VAR=value>...]
 #       a stats case that reads only the header (fexstats --header, which reads any layout), and
 #       the last read has to say the version of the FEX that should be running.
@@ -31,6 +32,12 @@
 # <engines> is both, engine or mine. Logs are <work dir>/<engine>/<label>.log, fexstats's output
 # <label>.reader.<n>. Within cases.zsh, $prefix is that directory and $which the engine (engine or
 # mine). Prints a Markdown summary; exits 1 when a check or stats case failed.
+#
+# The summary ends with a table of every case and whether it passed under each FEX. A case is
+# open from its check or stats line (or begin_case, for a check in cases.zsh that runs run.zsh
+# itself) until the next one, and fails when anything failed while it was open, its own checks
+# included. A label that ends in -dev or -engine-like is a case of that rerun set
+# (jdrly/gw2-on-mac#325), and the table names the set.
 #
 # With GW2_LANE=long or GW2_LANE=short in the environment it runs a part of the cases, so the
 # workflow can run two of these side by side (see "lane" below). Unset, it runs every case.
@@ -51,12 +58,30 @@ integer failed=0
 # they run from.
 lane=${GW2_LANE:-all}
 [[ $lane == (all|long|short) ]] || { print -u2 "engine.zsh: GW2_LANE is long or short, or unset"; exit 2 }
-long_programs=(counters.exe codebuf.exe)
+long_programs=(counters.exe codebuf.exe tsoqueue.exe)
 both_lanes=(smoke-log hardware-tso)
 # the labels of the check and stats cases this process ran, for the checks in cases.zsh
 typeset -A ran
 
 applies() { [[ $1 == both || $1 == "$which" ]] }
+
+# each case's result, <label>/<engine> to ok or FAIL, and the labels in the order they first ran
+typeset -A results
+typeset -a result_labels
+current= opened=0
+
+# begin_case <label>: closes the case before it, and opens this one
+begin_case() {
+  end_case
+  current=$1 opened=$failed
+}
+
+end_case() {
+  [[ -n $current ]] || return 0
+  if (( failed > opened )); then results[$current/$which]=FAIL; else results[$current/$which]=ok; fi
+  (( ${result_labels[(Ie)$current]} )) || result_labels+=($current)
+  current=
+}
 
 # in_lane <label> [<program>]: whether this process's lane runs that case
 in_lane() {
@@ -70,6 +95,7 @@ check() {
   shift 5
   applies $engines && in_lane $label $program || return 0
   ran[$label]=1
+  begin_case $label
   "$here/run.zsh" "$wine" "$prefix" "$label" "$secs" "$line" "$tests/$program" "$@" || failed+=1
 }
 
@@ -78,12 +104,17 @@ stats() {
   shift 6
   applies $engines && in_lane $label $program || return 0
   ran[$label]=1
+  begin_case $label
   GW2_TEST_READER="$tests/fexstats ${GW2_STATS_OPTIONS:-}" "$here/run.zsh" "$wine" "$prefix" "$label" "$secs" "$line" \
     "$tests/$program" "$@" FEX_PROFILESTATS=1 || failed+=1
   local files=($prefix/$label.reader.<->(Nn)) f
+  integer lines
+  # a read of counters.exe or slots.exe is 200 or 608 lines, and a step's summary takes 1024k
   for f in $files; do
     print "      read ${f##*.}:"
-    sed 's/^/        /' "$f"
+    head -n 20 "$f" | sed 's/^/        /'
+    lines=$(wc -l <"$f")
+    (( lines <= 20 )) || print "        ... $(( lines - 20 )) more lines in ${f:t}"
   done
   local last=(${(f)"$( (( ${#files} )) && cat "$files[-1]")"})
   if (( ${#files} && ${last[(I)$~pattern]} )); then
@@ -121,6 +152,7 @@ for which in $passes; do
   print "### Under $names[$which]$note\n"
   print '```'
   source "$here/cases.zsh"
+  end_case
   print '```\n'
 done
 
@@ -133,4 +165,18 @@ if (( ${#report_labels} )) && [[ $lane != long ]]; then
   done
   print
 fi
+title=Cases
+[[ $lane != long ]] || title="Cases, the long lane"
+print "### $title\n"
+print "| case | set | the engine's FEX | my FEX |"
+print "|---|---|---|---|"
+for label in $result_labels; do
+  in_set=
+  case $label in
+    (*-engine-like) in_set=engine-like ;;
+    (*-dev) in_set=dev ;;
+  esac
+  print "| $label | $in_set | ${results[$label/engine]:--} | ${results[$label/mine]:--} |"
+done
+print
 (( failed == 0 ))

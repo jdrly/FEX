@@ -23,6 +23,31 @@ ran about 20% slower than in a row. I had planned on 336 and 380 s for the lanes
 I keep the 500 s. A job of its own for the long lane would take another runner and a second
 setup.
 
+## 2026-11-19: the reruns fold into two sets
+
+jdrly/gw2-on-mac#325. In run 44433755065 the step took 487 s. The file times in its
+`engine-tests` artifact put the short lane at about 486 s and the long lane at about 466 s, so
+both lanes set the step's length. Its 89 cases had 30 reruns under four sets of my switches
+(`lookup-off`, `compilelock`, `cuts`, `dev`) and about 400 s of their program time. The CI
+audit of 2026-11-19 found no run in which one of them failed.
+
+They are two sets now, at the end of `cases.zsh`. `dev` has each of my on-or-off switches on,
+and `engine-like` has both lookups at 0. Every program that had a rerun runs once under each,
+except `counters.exe` and `codebuf.exe`, which run under `dev` only. That leaves 66 cases. The
+long lane takes `tsoqueue.exe` as well, so the two lanes come out about even: its four cases
+run 10 s each and read nothing from another lane's prefix.
+
+Predicted from run 44433755065's case times, with each new case timed as the old rerun it
+replaces: the long lane about 375 s, the short lane about 350 s, the step about 375 s. That is
+a prediction, not a measured run. The issue asked for under 300 s. Its own list doesn't get
+there. The kept cases plus one boot per prefix come to about 720 s of lane time, so two lanes
+can't go much under 360 s. I keep every case the issue lists rather than cut more to reach 300.
+
+Run 44433755065's step summary didn't upload. GitHub takes 1024k, and the step wrote 1220k,
+about 172k of it for each `counters` or `slots` case, all reads.
+`stats` now prints each read's first 20 lines. The whole files are in the artifact. Each lane's
+summary ends with a table of its cases, with each set named.
+
 ## Consequences
 
 - Every case still runs once, except `smoke-log` and its report `hardware-tso`. `counters_check`
@@ -59,7 +84,8 @@ setup.
 
 ## Evidence
 
-- jdrly/gw2-on-mac #235.
+- jdrly/gw2-on-mac #235, and #325 for the two sets.
+- Run 44433755065 and its `engine-tests` artifact for the lane times before the two sets.
 - Run 43769470898 for the cases' times, and the job's first step for the runner's 3 CPUs. Runs
   43994927356, 44009162480 and 44012662403 for the three latest steps in a row. Run 44016265366
   for the first one with lanes.
