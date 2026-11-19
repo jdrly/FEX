@@ -14,7 +14,8 @@ stage, and 451 s for the Linux job.
 So the step "Which tests this run owes", in the build job and the core job, now also reads a
 pull request's changed files, from GitHub's compare of its base with its head:
 
-- When every changed file is Markdown or under `docs/`, the build job builds, compares and runs
+- When every changed file is Markdown or under `docs/`, and none is under
+  `FEXCore/Source/Interface/Core`, the build job builds, compares and runs
   Mach9's smoke program once under my FEX, and the core job builds and runs no test. One other
   file of any kind, the workflow and the test scripts included, and the pull request runs its
   tests.

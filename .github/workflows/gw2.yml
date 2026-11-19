@@ -70,9 +70,9 @@
 #   step "Which tests this run owes", in build and in core), builds, compares and publishes as any
 #   push. In place of the test stage it runs Mach9's smoke program once under my FEX. Any other
 #   push runs everything (jdrly/gw2-on-mac#226, #242). The core job runs all of its tests on every
-#   push. A pull request whose every file is Markdown or under docs/ runs the smoke program in place
-#   of the test stage, and its core job builds, so the branch's ccache stays fresh, and runs no
-#   test (jdrly/gw2-on-mac#326).
+#   push. A pull request whose every file is Markdown or under docs/, and none under
+#   FEXCore/Source/Interface/Core, runs the smoke program in place of the test stage, and its core
+#   job builds, so the branch's ccache stays fresh, and runs no test (jdrly/gw2-on-mac#326).
 # publish: after the others are green, packs fex-arm64-<commit>.tar.xz and prints its sha256. For a
 #   push to gw2-on-mac it adds it to the pre-release arm64-builds, the one release this workflow
 #   makes, never marked latest, and keeps the 30 newest.
