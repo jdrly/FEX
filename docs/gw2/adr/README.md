@@ -11,7 +11,7 @@ next free number.
 | File | Decided | One line |
 |---|---|---|
 | [`0001-a-fork-of-my-own-with-ai-patches-and-nothing-goes-upstream.md`](0001-a-fork-of-my-own-with-ai-patches-and-nothing-goes-upstream.md) | 2026-11-12 | The fork exists for the game thread's cycles. Its first commit replaces FEX's no-AI files with my rule, and nothing goes to FEX-Emu or athei. |
-| [`0002-every-change-is-an-option-that-is-off-in-the-fork.md`](0002-every-change-is-an-option-that-is-off-in-the-fork.md) | 2026-11-12, narrowed 2026-11-15 | Each change is a `FEX_*` option, off by default until it wins in play (0008). Dev builds turn them on, except one that costs frames for a symptom nobody saw. |
+| [`0002-every-change-is-an-option-that-is-off-in-the-fork.md`](0002-every-change-is-an-option-that-is-off-in-the-fork.md) | 2026-11-12, narrowed 2026-11-15 and 2026-11-19 | Each change is a `FEX_*` option, off by default until it wins in play (0008). Dev builds turn them on, except one that costs frames for a symptom nobody saw. |
 | [`0003-the-build-is-gated-against-the-engine-fex.md`](0003-the-build-is-gated-against-the-engine-fex.md) | 2026-11-12 | The PE DLLs match the engine's byte for byte but for link times. The `.so` files hold a structural gate on Xcode 27. |
 | [`0004-while-github-blocks-the-fork-a-mac-is-its-ci.md`](0004-while-github-blocks-the-fork-a-mac-is-its-ci.md) | 2026-11-13 | When GitHub blocks the workflows, a Mac builds and tests, the tree lands with `[skip ci]`, and the asset is uploaded by hand. |
 | [`0005-the-project-rules-that-bind-this-fork.md`](0005-the-project-rules-that-bind-this-fork.md) | recorded 2026-11-17 | The project-wide rules in a sentence each, pointing to the workspace ADRs. |
