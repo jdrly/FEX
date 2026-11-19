@@ -33,9 +33,8 @@
 #   the release tarball unpacked twice, once as it is and once with my libarm64ecfex.dll (also as
 #   xtajit64.dll) and libarm64ecfex.so, and tests/gw2/engine.zsh runs every case of
 #   tests/gw2/cases.zsh under each, in a scratch prefix, without a window. It runs twice at once,
-#   in the same step: the cases of counters.exe, codebuf.exe and tsoqueue.exe under my FEX in one
-#   lane, with a second copy of my engine, and every other case in the other (jdrly/gw2-on-mac#235,
-#   #325).
+#   in the same step: the cases of counters.exe and codebuf.exe under my FEX in one lane, with a
+#   second copy of my engine, and every other case in the other (jdrly/gw2-on-mac#235).
 #   Today: Mach9's
 #   smoke/fex.c (athei/mach9 at $MACH9_COMMIT, by its sha256) in FEX's default mode and with
 #   FEX_SMCCHECKS=full; the same with FEX's log on, which says whether hardware TSO works on this
@@ -543,8 +542,8 @@ jobs:
               "$RUNNER_TEMP/engine-tests" "$BASE_VERSION" "$mine"
           }
           if grep -q GW2_LANE "$SRC/tests/gw2/engine.zsh"; then
-            # two lanes side by side (jdrly/gw2-on-mac#235): counters.exe, codebuf.exe and
-            # tsoqueue.exe under my FEX in one, every other case in the other
+            # two lanes side by side (jdrly/gw2-on-mac#235): counters.exe and codebuf.exe under
+            # my FEX in one, every other case in the other
             stage long engine-mine-long >"$RUNNER_TEMP/engine-tests-long.md" &
             long=$!
             stage short engine-mine >"$RUNNER_TEMP/engine-tests.md" || status=1

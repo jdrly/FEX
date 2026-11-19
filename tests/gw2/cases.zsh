@@ -418,13 +418,13 @@ check condloop-off both 60 condloop.exe "$condloop" GW2_CONDLOOP_EXPECT=hang
 check condloop-on mine 120 condloop.exe "$condloop" GW2_CONDLOOP_EXPECT=suspend $backedge
 
 # The two rerun sets (jdrly/gw2-on-mac#325), under mine only. Every program whose cases ran again
-# under a set of my switches runs once under each, but counters.exe and codebuf.exe, which run
-# under dev only:
+# under a set of my switches runs once under each:
 #   dev          each of my on-or-off switches on: the back-edge suspend (#169), the compile lock
 #                (#165), both lookups (#161, #162), #164's two and the trap flag's (#168). The
 #                values of the others that dev-switches.conf sets (128 MB, keep, a fixed L1,
 #                disableavx) have cases of their own above.
-#   engine-like  both lookups at 0, as the engine's FEX finds blocks
+#   engine-like  both lookups at 0, as the engine's FEX finds blocks. A release build of my app
+#                runs the engine's FEX, so this is the path players run.
 # Each case is a base case above with the set's variables added, and its label is the base case's
 # with the set's name last, which is how engine.zsh's table tells the set. Single steps trap at
 # step_after in both sets: dev has #168's switch, and engine-like runs singlestep-trapflag. avx
@@ -438,7 +438,10 @@ check smoke-default-dev mine 40 fex.exe "$smoke" $dev
 check smoke-smcchecks-full-engine-like mine 160 fex.exe "$smoke" $enginelike FEX_SMCCHECKS=full
 stats counters-dev mine 300 counters.exe "$counters" "$counted<1->" $dev
 if [[ $which == mine ]]; then counters_check counters-dev '<1->'; fi
+stats counters-engine-like mine 300 counters.exe "$counters" "$counted<1->" $enginelike
+if [[ $which == mine ]]; then counters_check counters-engine-like '<1->'; fi
 codebuf codebuf-unset-dev discard mine $dev
+codebuf codebuf-unset-engine-like discard mine $enginelike
 stats slots-dev mine 120 slots.exe 'gw2 test slots: passed' 'thread <->: *' $dev
 if [[ $which == mine ]]; then slots_check slots-dev; fi
 stats slots-engine-like mine 120 slots.exe 'gw2 test slots: passed' 'thread <->: *' $enginelike

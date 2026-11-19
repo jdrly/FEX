@@ -33,17 +33,16 @@ and smaller reruns about 80 s more. The CI audit of 2026-11-19 found no run in w
 them failed.
 
 They are two sets now, at the end of `cases.zsh`. `dev` has each of my on-or-off switches on,
-and `engine-like` has both lookups at 0. Every program that had a rerun runs once under each,
-except `counters.exe` and `codebuf.exe`, which run under `dev` only. The three cases with only
-the dispatcher's L1 lookup off stay. That leaves 69 cases. The
-long lane takes `tsoqueue.exe` as well, so the two lanes come out about even: its four cases
-run 10 s each and read nothing from another lane's prefix.
+and `engine-like` has both lookups at 0. Every program that had a rerun runs once under each.
+`engine-like` is what players run: a release build of my app runs the engine's FEX. The three
+cases with only the dispatcher's L1 lookup off stay. That leaves 71 cases, in the same two
+lanes as before.
 
 Predicted from run 44433755065's case times, with each new case timed as the old rerun it
-replaces: the long lane about 375 s, the short lane about 360 s, the step about 375 s. That is
+replaces: the long lane about 395 s, the short lane about 410 s, the step about 410 s. That is
 a prediction, not a measured run. The issue asked for under 300 s. Its own list doesn't get
-there. The kept cases plus one boot per prefix come to about 735 s of lane time, so two lanes
-can't go much under 365 s. I keep every case the issue lists rather than cut more to reach 300.
+there. The kept cases plus one boot per prefix come to about 805 s of lane time, so two lanes
+can't go much under 400 s. I keep these cases rather than cut more to reach 300.
 
 Run 44433755065's step summary didn't upload. GitHub takes 1024k, and the step wrote 1220k,
 about 172k of it for each `counters` or `slots` case, all reads.

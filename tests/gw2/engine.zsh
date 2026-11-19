@@ -58,7 +58,7 @@ integer failed=0
 # they run from.
 lane=${GW2_LANE:-all}
 [[ $lane == (all|long|short) ]] || { print -u2 "engine.zsh: GW2_LANE is long or short, or unset"; exit 2 }
-long_programs=(counters.exe codebuf.exe tsoqueue.exe)
+long_programs=(counters.exe codebuf.exe)
 both_lanes=(smoke-log hardware-tso)
 # the labels of the check and stats cases this process ran, for the checks in cases.zsh
 typeset -A ran
