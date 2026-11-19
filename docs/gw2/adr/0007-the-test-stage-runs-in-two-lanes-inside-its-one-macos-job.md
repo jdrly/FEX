@@ -27,9 +27,9 @@ setup.
 
 jdrly/gw2-on-mac#325. In run 44433755065 the step took 487 s. The file times in its
 `engine-tests` artifact put the short lane at about 486 s and the long lane at about 466 s, so
-both lanes set the step's length. Its 89 cases had 30 reruns under four sets of my switches
-(`lookup-off`, `compilelock`, `cuts`, `dev`) and about 400 s of their program time. The CI
-audit of 2026-11-19 found no run in which one of them failed.
+both lanes set the step's length. Of its 89 cases, the reruns of nine programs under four sets
+of my switches (`lookup-off`, `compilelock`, `cuts`, `dev`) took about 400 s of program time.
+The CI audit of 2026-11-19 found no run in which one of them failed.
 
 They are two sets now, at the end of `cases.zsh`. `dev` has each of my on-or-off switches on,
 and `engine-like` has both lookups at 0. Every program that had a rerun runs once under each,
@@ -66,8 +66,8 @@ summary ends with a table of its cases, with each set named.
   30 to 120 times a healthy case. `tsoqueue` counts how many items arrive in its 10 s, so it now
   counts fewer: 39,087,034 in run 44016265366, against 99,350,136 in run 44012662403. Nothing
   fails on that.
-- The two lanes add up to about 930 s of work. Moving a case from one lane to the other can't
-  bring the step reliably under 480 s.
+- In run 44016265366, before the two sets, the two lanes added up to about 930 s of work.
+  Moving a case from one lane to the other couldn't bring the step reliably under 480 s then.
 - The summary has the long lane's block last, after "Reports".
 - The `build` job's 45 minutes and `hang`'s 10 s from ADR 0006 stay. The lanes landed after that
   change had a green run, run 44012662403.

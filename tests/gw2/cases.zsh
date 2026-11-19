@@ -422,12 +422,15 @@ check condloop-on mine 120 condloop.exe "$condloop" GW2_CONDLOOP_EXPECT=suspend 
 #                disableavx) have cases of their own above.
 #   engine-like  both lookups at 0, as the engine's FEX finds blocks
 # Each case is a base case above with the set's variables added, and its label is the base case's
-# with the set's name last, which is how engine.zsh's table tells the set. Single steps under dev
-# trap at step_after, as #168 wants with its switch; condloop under engine-like runs without the
-# back-edge suspend, so its je loop has to hang. entryfault's fault loop closes with jb back.
+# with the set's name last, which is how engine.zsh's table tells the set. Single steps trap at
+# step_after in both sets: dev has #168's switch, and engine-like runs singlestep-trapflag. avx
+# runs hidden in both. Each set runs Mach9's smoke test and entryfault once, one of them with
+# FEX_SMCCHECKS=full: FEX's default mode finds a write into code by the page's fault, full
+# checks each block, so each set has both. condloop under engine-like runs without the back-edge
+# suspend, so its je loop has to hang. entryfault's fault loop closes with jb back.
 dev=($backedge $all FEX_LEA32BITADDS=1 FEX_SIGNEXTENDINGLOADS=1 FEX_TRAPFLAGINDIRECTBRANCHES=1)
 enginelike=($lookupsoff)
-check smoke-smcchecks-full-dev mine 160 fex.exe "$smoke" $dev FEX_SMCCHECKS=full
+check smoke-default-dev mine 40 fex.exe "$smoke" $dev
 check smoke-smcchecks-full-engine-like mine 160 fex.exe "$smoke" $enginelike FEX_SMCCHECKS=full
 stats counters-dev mine 300 counters.exe "$counters" "$counted<1->" $dev
 if [[ $which == mine ]]; then counters_check counters-dev '<1->'; fi
@@ -445,12 +448,12 @@ stats tsocalls-keep-engine-like mine 300 tsocalls.exe 'gw2 test tsocalls: passed
   FEX_HARDWARETSOSYSCALLS=keep GW2_TSOCALLS_ITERATIONS=$tsocalls_iterations $enginelike
 tsocalls_traps tsocalls-keep-engine-like keep
 check singlestep-dev mine 60 singlestep.exe "$stepped" $dev
-check singlestep-engine-like mine 60 singlestep.exe 'gw2 test singlestep: passed' $enginelike
+check singlestep-trapflag-engine-like mine 60 singlestep.exe "$stepped" FEX_TRAPFLAGINDIRECTBRANCHES=1 $enginelike
 if [[ $which == mine ]]; then crash_check crash-dev $dev; fi
 if [[ $which == mine ]]; then crash_check crash-engine-like $enginelike; fi
-check entryfault-dev mine 120 entryfault.exe "$entryfault" $dev
+check entryfault-smcchecks-full-dev mine 160 entryfault.exe "$entryfault" $dev FEX_SMCCHECKS=full
 check entryfault-engine-like mine 120 entryfault.exe "$entryfault" $enginelike
 check avx-hidden-dev mine 60 avx.exe "$avx" GW2_AVX_EXPECT=hidden $noavx $dev
-check avx-seen-engine-like mine 60 avx.exe "$avx" GW2_AVX_EXPECT=seen $enginelike
+check avx-hidden-engine-like mine 60 avx.exe "$avx" GW2_AVX_EXPECT=hidden $noavx $enginelike
 check condloop-dev mine 120 condloop.exe "$condloop" GW2_CONDLOOP_EXPECT=suspend $dev
 check condloop-engine-like mine 60 condloop.exe "$condloop" GW2_CONDLOOP_EXPECT=hang $enginelike
