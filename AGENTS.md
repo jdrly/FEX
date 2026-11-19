@@ -44,7 +44,8 @@ nothing, so the rule doesn't stop work here. What it does mean:
   that an AI agent wrote the change.
 - Every change to what FEX does sits behind a `FEX_*` option that is off by default. It is an
   entry in `FEXCore/Source/Interface/Config/Config.json.in`, so a rule in my app can set it for
-  one program.
+  one program. An option that won in play becomes the default and keeps its off value
+  (`docs/gw2/adr/0008-an-option-that-won-in-play-becomes-the-default.md`).
 - A change to code generation raises the disk cache's `FormatVersion`
   (`FEXCore/Source/Interface/Core/DiskCache.h`) in my own bump commit, which stays last in the
   branch.

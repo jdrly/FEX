@@ -255,7 +255,8 @@ tsocalls_traps tsocalls-keep keep
 # 100,000 times between its two reads, each call an entry from native code and its return an exit
 # into native code. Off, each entry is a lookup in C++ that L1 answers, so l1_hits grows by about
 # the calls (99% to 110%: a shrink of the dynamic L1 sends a few to L3). On, the dispatcher answers
-# them, and l1_hits grows by fewer than 100. native_exits has to grow by at least the calls in both
+# them, and l1_hits grows by fewer than 100. On is the default since jdrly/gw2-on-mac#266, so the
+# on case runs with the variable unset. native_exits has to grow by at least the calls in both
 # modes, or qsort didn't run as native code and the case proves nothing. Under mine only: the engine's
 # FEX doesn't know the switch, and l1_hits is padding in its slots.
 l1lookup_check() {
@@ -279,17 +280,18 @@ l1lookup_check() {
 }
 stats l1lookup-off mine 120 l1lookup.exe 'gw2 test l1lookup: passed' 'thread <->: * l1_hits=<->*' FEX_DISPATCHERL1LOOKUP=0
 if [[ $which == mine ]]; then l1lookup_check l1lookup-off off; fi
-stats l1lookup-on mine 120 l1lookup.exe 'gw2 test l1lookup: passed' 'thread <->: * l1_hits=<->*' FEX_DISPATCHERL1LOOKUP=1
+stats l1lookup-on mine 120 l1lookup.exe 'gw2 test l1lookup: passed' 'thread <->: * l1_hits=<->*'
 if [[ $which == mine ]]; then l1lookup_check l1lookup-on on; fi
 
 # Single steps and int3 into code already in L1 (tests/gw2/singlestep.c): each resume goes through
 # the dispatcher, whose trap flag check has to come before its L1 lookup. Under both FEXes with
-# the switch unset, and under mine with it on. Then Mach9's smoke test with it on, with and without
-# FEX_SMCCHECKS=full, whose invalidations clear L1 entries that the dispatcher now reads.
+# the switch unset, which under mine is on, and under mine with it off. Mach9's smoke test, with
+# and without FEX_SMCCHECKS=full, whose invalidations clear L1 entries that the dispatcher reads,
+# runs above with the switch on, and here with it off.
 check singlestep both 60 singlestep.exe 'gw2 test singlestep: passed'
-check singlestep-l1lookup mine 60 singlestep.exe 'gw2 test singlestep: passed' FEX_DISPATCHERL1LOOKUP=1
-check smoke-l1lookup mine 40 fex.exe "$smoke" FEX_DISPATCHERL1LOOKUP=1
-check smoke-l1lookup-smcchecks-full mine 160 fex.exe "$smoke" FEX_DISPATCHERL1LOOKUP=1 FEX_SMCCHECKS=full
+check singlestep-l1lookup-off mine 60 singlestep.exe 'gw2 test singlestep: passed' FEX_DISPATCHERL1LOOKUP=0
+check smoke-l1lookup-off mine 40 fex.exe "$smoke" FEX_DISPATCHERL1LOOKUP=0
+check smoke-l1lookup-off-smcchecks-full mine 160 fex.exe "$smoke" FEX_DISPATCHERL1LOOKUP=0 FEX_SMCCHECKS=full
 
 # A crash shows as one (jdrly/gw2-on-mac#132). crash.exe prints one line and writes to address 16.
 # With the prefix's crash dialog off (run.zsh), winedbg --auto prints the exception and the
@@ -322,41 +324,42 @@ crash_check() {
 }
 crash_check
 
-# jdrly/gw2-on-mac#162: FEX_ENTRYHEADERLOOKUP=1, under which no block entry stores its header and
-# FEX finds the block of a fault, suspend or SMC write from the host PC. entryfault.exe
+# jdrly/gw2-on-mac#162: FEX_ENTRYHEADERLOOKUP, under which no block entry stores its header and
+# FEX finds the block of a fault, suspend or SMC write from the host PC. It is on by default since
+# jdrly/gw2-on-mac#266, so every case above that sets nothing runs with it. entryfault.exe
 # (tests/gw2/entryfault.c) faults at a function's first block, after a call returns, three calls
 # deep and in a hot loop, writes into the block it runs in, and suspends a thread spinning in
-# translated code 1,000 times. Under both FEXes without the option, which checks the program,
-# and under mine with it, also with FEX_SMCCHECKS=full. Then, under mine with it on: the crash,
-# single steps (#161's singlestep.exe), Mach9's smoke test in both modes, tsoqueue, tsocalls,
-# codebuf (unset, so the code buffer moves, and at 128) and counters.
-lookup=FEX_ENTRYHEADERLOOKUP=1
+# translated code 1,000 times. Under both FEXes with the option unset: the engine's FEX, which
+# checks the program, and mine with it on. Then, under mine with it off: entryfault, also with
+# FEX_SMCCHECKS=full, the crash, single steps (#161's singlestep.exe), Mach9's smoke test in both
+# modes, tsoqueue, tsocalls, codebuf (unset, so the code buffer moves, and at 128) and counters.
+lookupoff=FEX_ENTRYHEADERLOOKUP=0 lookupsoff=(FEX_ENTRYHEADERLOOKUP=0 FEX_DISPATCHERL1LOOKUP=0)
 entryfault='gw2 test entryfault: passed'
 check entryfault both 120 entryfault.exe "$entryfault"
-check entryfault-lookup mine 120 entryfault.exe "$entryfault" $lookup
-check entryfault-lookup-smcchecks-full mine 160 entryfault.exe "$entryfault" $lookup FEX_SMCCHECKS=full
-if [[ $which == mine ]]; then crash_check crash-lookup $lookup; fi
-check singlestep-lookup mine 60 singlestep.exe 'gw2 test singlestep: passed' $lookup
-check smoke-default-lookup mine 40 fex.exe "$smoke" $lookup
-check smoke-smcchecks-full-lookup mine 160 fex.exe "$smoke" $lookup FEX_SMCCHECKS=full
-check tsoqueue-keep-lookup mine 150 tsoqueue.exe 'gw2 test tsoqueue: passed' FEX_HARDWARETSOSYSCALLS=keep $lookup
-stats tsocalls-keep-lookup mine 300 tsocalls.exe 'gw2 test tsocalls: passed' 'thread <->: *' \
-  FEX_HARDWARETSOSYSCALLS=keep GW2_TSOCALLS_ITERATIONS=$tsocalls_iterations $lookup
-tsocalls_traps tsocalls-keep-lookup keep
-codebuf codebuf-unset-lookup discard mine $lookup
-codebuf codebuf-128-lookup keep mine FEX_INITIALCODEBUFFERMB=128 FEX_SILENTLOG=0 $lookup
-stats counters-lookup mine 300 counters.exe "$counters" "$counted<1->" $lookup
-if [[ $which == mine ]]; then counters_check counters-lookup '<1->'; fi
+check entryfault-lookup-off mine 120 entryfault.exe "$entryfault" $lookupoff
+check entryfault-lookup-off-smcchecks-full mine 160 entryfault.exe "$entryfault" $lookupoff FEX_SMCCHECKS=full
+if [[ $which == mine ]]; then crash_check crash-lookup-off $lookupoff; fi
+check singlestep-lookup-off mine 60 singlestep.exe 'gw2 test singlestep: passed' $lookupoff
+check smoke-default-lookup-off mine 40 fex.exe "$smoke" $lookupoff
+check smoke-smcchecks-full-lookup-off mine 160 fex.exe "$smoke" $lookupoff FEX_SMCCHECKS=full
+check tsoqueue-keep-lookup-off mine 150 tsoqueue.exe 'gw2 test tsoqueue: passed' FEX_HARDWARETSOSYSCALLS=keep $lookupoff
+stats tsocalls-keep-lookup-off mine 300 tsocalls.exe 'gw2 test tsocalls: passed' 'thread <->: *' \
+  FEX_HARDWARETSOSYSCALLS=keep GW2_TSOCALLS_ITERATIONS=$tsocalls_iterations $lookupoff
+tsocalls_traps tsocalls-keep-lookup-off keep
+codebuf codebuf-unset-lookup-off discard mine $lookupoff
+codebuf codebuf-128-lookup-off keep mine FEX_INITIALCODEBUFFERMB=128 FEX_SILENTLOG=0 $lookupoff
+stats counters-lookup-off mine 300 counters.exe "$counters" "$counted<1->" $lookupoff
+if [[ $which == mine ]]; then counters_check counters-lookup-off '<1->'; fi
 
 # jdrly/gw2-on-mac#165: FEX_ENTRYCOMPILELOCK, one compile per entry when threads miss on it
 # together. compilelock.exe (tests/gw2/compilelock.c) has 8 workers call the same 63 fresh
 # functions at the same time, each function a block of 391 instructions. Between its two reads the
 # workers' jit_count is the compiles of those functions: off, about one per worker that missed
 # together, so it has to be at least one and a half times 63; on, 63, plus at most one a worker for
-# anything I didn't foresee. On also with FEX_ENTRYHEADERLOOKUP=1 and FEX_DISPATCHERL1LOOKUP=1.
-# Then, with all three on, what could hang on the new lock: Mach9's smoke test in both modes,
-# entryfault (faults, suspends and writes into running code, which invalidate), the crash, counters
-# (200 threads starting) and slots (608). Under mine only: the engine's FEX doesn't know the switch,
+# anything I didn't foresee. Off and on with both lookups off, as before #266 made them the
+# default, and on with both on ($all names them only to say what runs). Then, with all three on, what could hang on the
+# new lock: Mach9's smoke test in both modes, entryfault (faults, suspends and writes into running
+# code, which invalidate), the crash, counters (200 threads starting) and slots (608). Under mine only: the engine's FEX doesn't know the switch,
 # and the cases read the stats slots.
 compilelock_check() {
   local label=$1 mode=$2 tid d r functions log=()
@@ -383,9 +386,9 @@ compilelock_check() {
 compilelock='gw2 test compilelock: passed' compiled='thread <->: *jit_count=<->*'
 lock=FEX_ENTRYCOMPILELOCK=1
 all=($lock FEX_ENTRYHEADERLOOKUP=1 FEX_DISPATCHERL1LOOKUP=1)
-stats compilelock-off mine 120 compilelock.exe "$compilelock" "$compiled" FEX_ENTRYCOMPILELOCK=0
+stats compilelock-off mine 120 compilelock.exe "$compilelock" "$compiled" FEX_ENTRYCOMPILELOCK=0 $lookupsoff
 if [[ $which == mine ]]; then compilelock_check compilelock-off off; fi
-stats compilelock-on mine 120 compilelock.exe "$compilelock" "$compiled" $lock
+stats compilelock-on mine 120 compilelock.exe "$compilelock" "$compiled" $lock $lookupsoff
 if [[ $which == mine ]]; then compilelock_check compilelock-on on; fi
 stats compilelock-all mine 120 compilelock.exe "$compilelock" "$compiled" $all
 if [[ $which == mine ]]; then compilelock_check compilelock-all on; fi
@@ -400,9 +403,9 @@ if [[ $which == mine ]]; then slots_check slots-compilelock; fi
 
 # jdrly/gw2-on-mac#164: FEX_LEA32BITADDS and FEX_SIGNEXTENDINGLOADS change what LEA and MOVSX
 # compile to, each off by default. FEX's own assembly and instruction count tests in the core job
-# cover what they compute. Here both run together with FEX_ENTRYHEADERLOOKUP=1, as a dev build of
-# my app runs them, through the cases the #162 block above runs.
-cuts=(FEX_LEA32BITADDS=1 FEX_SIGNEXTENDINGLOADS=1 $lookup)
+# cover what they compute. Here both run together with the lookups on, their default, as a dev
+# build of my app runs them, through the cases the #162 block above runs.
+cuts=(FEX_LEA32BITADDS=1 FEX_SIGNEXTENDINGLOADS=1)
 check entryfault-cuts mine 120 entryfault.exe "$entryfault" $cuts
 check entryfault-cuts-smcchecks-full mine 160 entryfault.exe "$entryfault" $cuts FEX_SMCCHECKS=full
 if [[ $which == mine ]]; then crash_check crash-cuts $cuts; fi
@@ -422,28 +425,28 @@ if [[ $which == mine ]]; then counters_check counters-cuts '<1->'; fi
 # SystemCpuInformation, the shared data page, GetEnabledXStateFeatures) and runs a small kernel on
 # its SSE2 path and, where it sees AVX2, on its AVX2 path. GW2_AVX_EXPECT says which answers it
 # wants. Without the option AVX is seen under both FEXes; the engine's FEX ignores the option, so
-# hidden runs under mine only. Both again with the two lookups my dev builds run with. Then Mach9's
-# smoke test with the option, in both modes and with the lookups.
+# hidden runs under mine only. Under mine both have the two lookups on, their default, and both
+# run again with the lookups off. Then Mach9's smoke test with the option, in both modes and with
+# the lookups off.
 avx='gw2 test avx: passed'
 noavx=FEX_HOSTFEATURES=disableavx
-devlookups=(FEX_ENTRYHEADERLOOKUP=1 FEX_DISPATCHERL1LOOKUP=1)
 check avx-seen both 60 avx.exe "$avx" GW2_AVX_EXPECT=seen
 check avx-hidden mine 60 avx.exe "$avx" GW2_AVX_EXPECT=hidden $noavx
-check avx-seen-lookups mine 60 avx.exe "$avx" GW2_AVX_EXPECT=seen $devlookups
-check avx-hidden-lookups mine 60 avx.exe "$avx" GW2_AVX_EXPECT=hidden $noavx $devlookups
+check avx-seen-lookups-off mine 60 avx.exe "$avx" GW2_AVX_EXPECT=seen $lookupsoff
+check avx-hidden-lookups-off mine 60 avx.exe "$avx" GW2_AVX_EXPECT=hidden $noavx $lookupsoff
 check smoke-noavx mine 40 fex.exe "$smoke" $noavx
 check smoke-noavx-smcchecks-full mine 160 fex.exe "$smoke" $noavx FEX_SMCCHECKS=full
-check smoke-noavx-lookups mine 40 fex.exe "$smoke" $noavx $devlookups
+check smoke-noavx-lookups-off mine 40 fex.exe "$smoke" $noavx $lookupsoff
 
 # jdrly/gw2-on-mac#168: FEX_TRAPFLAGINDIRECTBRANCHES, under which a return, indirect jump or
 # indirect call in a block that checks TF goes through the dispatcher. Without it, singlestep.exe's
 # rounds 2 and 3 can return from step_target through L1 into step_after's block, which the
 # dispatcher compiled without TF checks after round 1 cleared TF: no trap at step_after, so TF
 # stays set into main. With it, every round has to trap at step_after and nothing outside step_run
-# may step. Under mine only, alone and with the two lookups my dev builds run with.
+# may step. Under mine only, with the two lookups on, their default, and with them off.
 stepped='gw2 test singlestep: every round trapped at step_after, no stray steps'
 check singlestep-trapflag mine 60 singlestep.exe "$stepped" FEX_TRAPFLAGINDIRECTBRANCHES=1
-check singlestep-trapflag-lookups mine 60 singlestep.exe "$stepped" FEX_TRAPFLAGINDIRECTBRANCHES=1 $devlookups
+check singlestep-trapflag-lookups-off mine 60 singlestep.exe "$stepped" FEX_TRAPFLAGINDIRECTBRANCHES=1 $lookupsoff
 
 # jdrly/gw2-on-mac#169: FEX_CONDBACKEDGESUSPEND, a suspend check on the taken side of a conditional
 # branch back to an earlier instruction. condloop.exe (tests/gw2/condloop.c) spins a thread in loops
