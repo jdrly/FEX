@@ -56,6 +56,8 @@
 #   instructions shorter with it at 1 than at 0, and unset the same as at 1. The assembly tests run
 #   once more with #164's two switches on (FEX_LEA32BITADDS, FEX_SIGNEXTENDINGLOADS), as a dev build
 #   of my app runs them.
+#   The pass with FEX_DISPATCHERL1LOOKUP=0 and the one with #164's switches run on a push and on a
+#   pull request that changes FEXCore/Source/Interface/Core or this workflow (jdrly/gw2-on-mac#326).
 #   FEX_CONDBACKEDGESUSPEND (#169) changes only what the JIT emits on Windows: on Linux the code is
 #   the same with it on and off, so the core job doesn't run with it. The failures are compared with tests/gw2/core-failures.txt, the
 #   engine's commit's, whose lines count for the runs with the options too: a test that isn't on
@@ -68,7 +70,8 @@
 #   step "Whether a green pull request tested this tree", in build and in core), builds, compares
 #   and publishes as any push. In place of the test stage it runs Mach9's smoke program once under
 #   my FEX, and its core job builds, so the branch's ccache stays fresh, and runs no test. Any other
-#   push runs everything (jdrly/gw2-on-mac#226, #242).
+#   push runs everything (jdrly/gw2-on-mac#226, #242). A pull request that changes only Markdown
+#   files and comment lines of this workflow runs the same way (jdrly/gw2-on-mac#326).
 # publish: after the others are green, packs fex-arm64-<commit>.tar.xz and prints its sha256. For a
 #   push to gw2-on-mac it adds it to the pre-release arm64-builds, the one release this workflow
 #   makes, never marked latest, and keeps the 30 newest.
@@ -207,15 +210,54 @@ jobs:
       # Then every gw2-on-mac the run could have merged was already in the head, and the run's
       # workflow and scripts were the head's (jdrly/gw2-on-mac#242). A lookup that fails counts as
       # "not tested". The core job runs the same step.
+      # A pull request that changes only Markdown files and comment lines of this workflow (docs=1)
+      # runs the same smoke run and builds in the core job, as that push does. One that doesn't
+      # change FEXCore/Source/Interface/Core or this workflow's other lines (passes=0) runs the core
+      # job's tests without asm-l1lookup-off and asm-cuts. A push runs both passes whenever it runs
+      # the core job's tests (jdrly/gw2-on-mac#326, docs/gw2/adr/0009). A comment line is one whose
+      # first character after the indentation is #, which holds as long as this file has no
+      # here-document. The changed paths come from GitHub's compare of the pull request's base with
+      # its head. A lookup that fails, or a list at the compare's cap of 300 files, owes everything.
       - &tested_tree
-        name: Whether a green pull request tested this tree
+        name: Which tests this run owes
         id: tested
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          green=0
-          if [[ $GITHUB_EVENT_NAME == push ]]; then
+          green=0 docs=0 passes=1
+          if [[ $GITHUB_EVENT_NAME == pull_request ]]; then
+            # <ref>'s gw2.yml without its comment lines
+            reach() {
+              gh api "repos/$GH_REPO/contents/.github/workflows/gw2.yml?ref=$1" -H 'Accept: application/vnd.github.raw' |
+                grep -v '^[[:space:]]*#'
+            }
+            # the merge base, the number of files, then each changed path and a renamed file's old one
+            list=$(gh api "repos/$GH_REPO/compare/$PR_BASE...$COMMIT" \
+              -q '.merge_base_commit.sha, (.files | length), (.files[] | .filename, (.previous_filename // empty))') || list=""
+            fork=$(sed -n 1p <<<"$list") count=$(sed -n 2p <<<"$list")
+            if [[ $fork =~ ^[0-9a-f]{40}$ && $count =~ ^[0-9]+$ ]] && (( count > 0 && count < 300 )); then
+              docs=1 passes=0 workflow=0
+              while IFS= read -r f; do
+                case $f in
+                  *.md) ;;
+                  .github/workflows/gw2.yml) workflow=1 ;;
+                  FEXCore/Source/Interface/Core/*) docs=0 passes=1 ;;
+                  *) docs=0 ;;
+                esac
+              done < <(sed 1,2d <<<"$list")
+              # a fetch that fails counts as a change
+              if (( workflow )) && ! { old=$(reach "$fork") && new=$(reach "$COMMIT") && [[ -n $old && $old == "$new" ]]; }; then
+                docs=0 passes=1
+              fi
+              echo "pull request against $fork, $count files: docs only $docs, asm-l1lookup-off and asm-cuts $passes" |
+                tee -a "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::warning::no list of the files this pull request changes, so it runs every test" |
+                tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          elif [[ $GITHUB_EVENT_NAME == push ]]; then
             tree=$(gh api "repos/$GH_REPO/commits/$COMMIT" -q .commit.tree.sha) || tree=""
             parent=$(gh api "repos/$GH_REPO/commits/$COMMIT" -q '.parents[0].sha // empty') || parent=""
             while read -r pr head; do
@@ -235,7 +277,7 @@ jobs:
                 tee -a "$GITHUB_STEP_SUMMARY"
             fi
           fi
-          echo "green=$green" >>"$GITHUB_OUTPUT"
+          { echo "green=$green"; echo "docs=$docs"; echo "passes=$passes"; } >>"$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
@@ -532,7 +574,7 @@ jobs:
           cp -Rc "$m" "$RUNNER_TEMP/engine-mine-long"
       - name: Tests on the engine
         id: engine-tests
-        if: ${{ !cancelled() && steps.engines.outcome == 'success' && steps.tested.outputs.green != '1' }}
+        if: ${{ !cancelled() && steps.engines.outcome == 'success' && steps.tested.outputs.green != '1' && steps.tested.outputs.docs != '1' }}
         run: |
           mine=$(LC_ALL=C grep -aoE 'FEX-[0-9]+(\.[0-9]+)?-[0-9]+-g[0-9a-f]{7,}' dist/fex/aarch64-windows/libarm64ecfex.dll | sort -u)
           status=0
@@ -555,11 +597,11 @@ jobs:
           fi
           tee -a "$GITHUB_STEP_SUMMARY" <"$RUNNER_TEMP/engine-tests.md"
           exit "$status"
-      # The lookup found a green pull request run on this tree, so the cases ran on it there. Here
-      # only that the files this push publishes load and translate: Mach9's smoke program under my
-      # FEX, as the stage's smoke-default runs it.
-      - name: Smoke (a push whose tree a pull request tested)
-        if: ${{ !cancelled() && steps.engines.outcome == 'success' && steps.tested.outputs.green == '1' }}
+      # The lookup found a green pull request run on this tree, so the cases ran on it there, or the
+      # pull request changes only docs. Here only that the files this run builds load and
+      # translate: Mach9's smoke program under my FEX, as the stage's smoke-default runs it.
+      - name: Smoke (a push whose tree a pull request tested, or a docs-only pull request)
+        if: ${{ !cancelled() && steps.engines.outcome == 'success' && (steps.tested.outputs.green == '1' || steps.tested.outputs.docs == '1') }}
         run: |
           "$SRC/tests/gw2/run.zsh" "$RUNNER_TEMP/engine-mine/wine" "$RUNNER_TEMP/engine-tests/mine" smoke-default 40 \
             'wine-build smoke test: x86_64 FEX cases passed' "$RUNNER_TEMP/tests/fex.exe" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -658,7 +700,9 @@ jobs:
       # whose own failures are on the list too), and a listing git then sees changed is one this
       # commit's JIT generates other code for.
       - name: Run them
-        if: steps.tested.outputs.green != '1'
+        if: steps.tested.outputs.green != '1' && steps.tested.outputs.docs != '1'
+        env:
+          PASSES: ${{ steps.tested.outputs.passes }}
         run: |
           out=$RUNNER_TEMP/core
           mkdir -p "$out"
@@ -683,19 +727,28 @@ jobs:
           }
           # my two lookups are on by default (jdrly/gw2-on-mac#266), so this pass runs with both
           suite asm '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp
-          # the same with the dispatcher's L1 lookup off (jdrly/gw2-on-mac#161): every entry of the
-          # harness goes through the dispatcher, and the switch may change no test's result, so its
-          # failures have to be the ones above. Kept out of the reference comparison as a .list.
-          suite asm-l1lookup-off '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_DISPATCHERL1LOOKUP=0
-          mv "$out/asm-l1lookup-off.failed" "$out/asm-l1lookup-off.list"
-          if ! diff <(sed 's/^asm-l1lookup-off /asm /' "$out/asm-l1lookup-off.list" | LC_ALL=C sort) <(LC_ALL=C sort "$out/asm.failed") >"$out/asm-l1lookup-off.diff"; then
-            echo "::error::the asm tests fail differently with FEX_DISPATCHERL1LOOKUP=0 (< with it, > the default)"
-            cat "$out/asm-l1lookup-off.diff"
-            status=1
+          # The next two passes only when the step "Which tests this run owes" says so: a push, or
+          # a pull request that changes FEXCore/Source/Interface/Core or this workflow
+          # (jdrly/gw2-on-mac#326). In every run since they exist they failed as the first pass did.
+          if [[ $PASSES != 0 ]]; then
+            # the same with the dispatcher's L1 lookup off (jdrly/gw2-on-mac#161): every entry of
+            # the harness goes through the dispatcher, and the switch may change no test's result,
+            # so its failures have to be the ones above. Kept out of the reference comparison as a
+            # .list.
+            suite asm-l1lookup-off '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_DISPATCHERL1LOOKUP=0
+            mv "$out/asm-l1lookup-off.failed" "$out/asm-l1lookup-off.list"
+            if ! diff <(sed 's/^asm-l1lookup-off /asm /' "$out/asm-l1lookup-off.list" | LC_ALL=C sort) <(LC_ALL=C sort "$out/asm.failed") >"$out/asm-l1lookup-off.diff"; then
+              echo "::error::the asm tests fail differently with FEX_DISPATCHERL1LOOKUP=0 (< with it, > the default)"
+              cat "$out/asm-l1lookup-off.diff"
+              status=1
+            fi
+            # #164's two switches with the lookups, as a dev build of my app runs them
+            suite asm-cuts '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_LEA32BITADDS=1 FEX_SIGNEXTENDINGLOADS=1
+          else
+            echo "asm-l1lookup-off, asm-cuts: not run, this pull request changes neither FEXCore/Source/Interface/Core nor the workflow" |
+              tee -a "$out/totals"
           fi
           suite asm-lookup-off '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_ENTRYHEADERLOOKUP=0
-          # #164's two switches with the lookups, as a dev build of my app runs them
-          suite asm-cuts '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_LEA32BITADDS=1 FEX_SIGNEXTENDINGLOADS=1
           suite instcountci 'InstCountCI/.*\.instcountci$'
           suite instcountci-update 'InstCountCI/.*new_numbers$'
           git diff --name-only -- unittests/InstructionCountCI | sed 's/^/instcountci-numbers /' >"$out/instcountci-numbers.failed"
@@ -722,7 +775,9 @@ jobs:
           fi
           exit "$status"
       - name: Against the reference list
-        if: steps.tested.outputs.green != '1'
+        if: steps.tested.outputs.green != '1' && steps.tested.outputs.docs != '1'
+        env:
+          PASSES: ${{ steps.tested.outputs.passes }}
         run: |
           out=$RUNNER_TEMP/core ref=tests/gw2/core-failures.txt
           {
@@ -737,22 +792,24 @@ jobs:
             echo "::error::no reference list $ref yet"
             exit 1
           fi
-          # the suites run again with FEX_ENTRYHEADERLOOKUP=0, and with #164's switches, have the
-          # same reference as the default runs
+          # the suites run again with FEX_ENTRYHEADERLOOKUP=0, and with #164's switches when that
+          # pass ran, have the same reference as the default runs
+          cuts=", its asm lines also for the run with #164's switches"
+          [[ $PASSES != 0 ]] || cuts=""
           LC_ALL=C sort "$ref" <(sed -n 's/^asm /asm-lookup-off /p; s/^instcountci /instcountci-lookup-off /p' "$ref") \
-            <(sed -n 's/^asm /asm-cuts /p' "$ref") >"$out/reference"
+            <(if [[ -n $cuts ]]; then sed -n 's/^asm /asm-cuts /p' "$ref"; fi) >"$out/reference"
           new=$(LC_ALL=C comm -23 "$out/failures" "$out/reference")
           fixed=$(LC_ALL=C comm -13 "$out/failures" "$out/reference")
           {
             if [[ -z $new && -z $fixed ]]; then
-              echo "- the same $(grep -c . "$out/reference" || true) failures as $ref, its asm and instcountci lines also for the runs with FEX_ENTRYHEADERLOOKUP=0, its asm lines also for the run with #164's switches"
+              echo "- the same $(grep -c . "$out/reference" || true) failures as $ref, its asm and instcountci lines also for the runs with FEX_ENTRYHEADERLOOKUP=0$cuts"
             fi
             [[ -z $fixed ]] || { echo "- on the reference list and passing now:"; echo '```'; echo "$fixed"; echo '```'; }
             [[ -z $new ]] || { echo "- **failing and not on the reference list:**"; echo '```'; echo "$new"; echo '```'; }
           } | tee -a "$GITHUB_STEP_SUMMARY"
           [[ -z $new ]]
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: ${{ !cancelled() && steps.tested.outputs.green != '1' }}
+        if: ${{ !cancelled() && steps.tested.outputs.green != '1' && steps.tested.outputs.docs != '1' }}
         with:
           name: core-failures-${{ env.COMMIT }}
           path: ${{ runner.temp }}/core
