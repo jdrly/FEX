@@ -30,12 +30,16 @@ need the block find it from the host PC.
   `FEX_ENTRYHEADERLOOKUP` stops storing. Leaving the option out no longer turns it off, so a sampler
   session sets `FEX_ENTRYHEADERLOOKUP=0`. The app does that, and its dev table drops the two rows
   (#267).
-- The disk cache's `FormatVersion` stays 57. The cache's key holds the value of every option that
-  affects code generation (`SerializeForCache` in `Config.cpp`), so blocks compiled with the entry
-  lookup on never mix with blocks compiled with it off, and the code for each value is what it was.
-- The tests run the defaults with both on. Each case that ran with `=1` now runs with `=0`, so the
-  off value keeps its coverage. Unset has to mean on: CodeSizeValidation's block entry is the same
-  unset as at 1, and `l1lookup.exe`'s on case runs with nothing set.
+- The disk cache's `FormatVersion` stays 57. The cache's key holds the resolved value of
+  `EntryHeaderLookup`, as it holds every boolean or number option that affects code generation
+  (`SerializeForCache` in `Config.cpp`). Blocks compiled with the entry lookup on never mix with
+  blocks compiled with it off, and the code for each value is what it was. The dispatcher, which
+  the L1 lookup changes, is generated at start and isn't in the cache.
+- The tests run the defaults with both on. A case that had an unset run and an `=1` run beside it
+  now has an `=0` run there, so the off value keeps its coverage, and the compile lock's control
+  runs with both at 0 as before. The compile lock's and the dev builds' combinations still name both
+  at 1. Unset has to mean on: CodeSizeValidation's block entry is the same unset as at 1, and
+  `l1lookup.exe`'s on case runs with nothing set.
 - The other options stay as ADR 0002 has them.
 
 ## Alternatives I rejected

@@ -11,7 +11,8 @@ keeps the fork's defaults.
 
 ## Consequences
 
-- With the rule on `Gw2-64.exe`, Steam keeps the engine's behaviour. The 128 MB code buffer
+- With the rule on `Gw2-64.exe`, Steam keeps the engine's behaviour for every option that is still
+  off. The 128 MB code buffer
   (`FEX_INITIALCODEBUFFERMB`) is committed only where the variable is set, so Steam keeps 16 MB.
 - A build's `VERSION` names the options the file has, and the app leaves out a line the installed
   FEX doesn't know.

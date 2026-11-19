@@ -356,8 +356,8 @@ if [[ $which == mine ]]; then counters_check counters-lookup-off '<1->'; fi
 # functions at the same time, each function a block of 391 instructions. Between its two reads the
 # workers' jit_count is the compiles of those functions: off, about one per worker that missed
 # together, so it has to be at least one and a half times 63; on, 63, plus at most one a worker for
-# anything I didn't foresee. On with both lookups off, and on with both on, their default since
-# #266 ($all names them only to say what runs). Then, with all three on, what could hang on the
+# anything I didn't foresee. Off and on with both lookups off, as before #266 made them the
+# default, and on with both on ($all names them only to say what runs). Then, with all three on, what could hang on the
 # new lock: Mach9's smoke test in both modes, entryfault (faults, suspends and writes into running
 # code, which invalidate), the crash, counters (200 threads starting) and slots (608). Under mine only: the engine's FEX doesn't know the switch,
 # and the cases read the stats slots.
@@ -386,7 +386,7 @@ compilelock_check() {
 compilelock='gw2 test compilelock: passed' compiled='thread <->: *jit_count=<->*'
 lock=FEX_ENTRYCOMPILELOCK=1
 all=($lock FEX_ENTRYHEADERLOOKUP=1 FEX_DISPATCHERL1LOOKUP=1)
-stats compilelock-off mine 120 compilelock.exe "$compilelock" "$compiled" FEX_ENTRYCOMPILELOCK=0
+stats compilelock-off mine 120 compilelock.exe "$compilelock" "$compiled" FEX_ENTRYCOMPILELOCK=0 $lookupsoff
 if [[ $which == mine ]]; then compilelock_check compilelock-off off; fi
 stats compilelock-on mine 120 compilelock.exe "$compilelock" "$compiled" $lock $lookupsoff
 if [[ $which == mine ]]; then compilelock_check compilelock-on on; fi
