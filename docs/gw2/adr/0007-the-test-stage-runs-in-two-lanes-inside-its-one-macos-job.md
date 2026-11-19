@@ -38,11 +38,13 @@ and `engine-like` has both lookups at 0. Every program that had a rerun runs onc
 cases with only the dispatcher's L1 lookup off stay. That leaves 71 cases, in the same two
 lanes as before.
 
-Predicted from run 44433755065's case times, with each new case timed as the old rerun it
-replaces: the long lane about 395 s, the short lane about 410 s, the step about 410 s. That is
-a prediction, not a measured run. The issue asked for under 300 s. Its own list doesn't get
-there. The kept cases plus one boot per prefix come to about 805 s of lane time, so two lanes
-can't go much under 400 s. I keep these cases rather than cut more to reach 300.
+From run 44433755065's case times, with each new case timed as the old rerun it replaces, I
+predicted the long lane at about 395 s, the short lane at about 410 s and the step at about
+410 s. The pull request's run 44631304080 took 380 s for the step. The lane times are still
+the prediction: I didn't measure them in that run. The issue asked for under 300 s. Its own
+list doesn't get there. The kept cases plus one boot per prefix come to about 805 s of lane
+time, so two lanes can't go much under 400 s, and 380 s is about that. I keep these cases
+rather than cut more to reach 300.
 
 Run 44433755065's step summary didn't upload. GitHub takes 1024k, and the step wrote 1220k,
 about 172k of it for each `counters` or `slots` case, all reads.
@@ -86,7 +88,8 @@ summary ends with a table of its cases, with each set named.
 ## Evidence
 
 - jdrly/gw2-on-mac #235, and #325 for the two sets.
-- Run 44433755065 and its `engine-tests` artifact for the lane times before the two sets.
+- Run 44433755065 and its `engine-tests` artifact for the lane times before the two sets. Run
+  44631304080 for the step with them.
 - Run 43769470898 for the cases' times, and the job's first step for the runner's 3 CPUs. Runs
   43994927356, 44009162480 and 44012662403 for the three latest steps in a row. Run 44016265366
   for the first one with lanes.
