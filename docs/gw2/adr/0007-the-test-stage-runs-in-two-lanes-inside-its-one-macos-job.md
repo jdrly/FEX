@@ -23,6 +23,32 @@ ran about 20% slower than in a row. I had planned on 336 and 380 s for the lanes
 I keep the 500 s. A job of its own for the long lane would take another runner and a second
 setup.
 
+## 2026-11-19: the reruns fold into two sets
+
+jdrly/gw2-on-mac#325. In run 44433755065 the step took 487 s. The file times in its
+`engine-tests` artifact put the short lane at about 486 s and the long lane at about 466 s, so
+both lanes set the step's length. Of its 89 cases, the reruns of nine programs under four sets
+of my switches (`lookup-off`, `compilelock`, `cuts`, `dev`) took about 315 s of program time,
+and smaller reruns about 80 s more. The CI audit of 2026-11-19 found no run in which one of
+them failed.
+
+They are two sets now, at the end of `cases.zsh`. `dev` has each of my on-or-off switches on,
+and `engine-like` has both lookups at 0. Every program that had a rerun runs once under each.
+`engine-like` is what players run: a release build of my app runs the engine's FEX. The three
+cases with only the dispatcher's L1 lookup off stay. That leaves 71 cases, in the same two
+lanes as before.
+
+Predicted from run 44433755065's case times, with each new case timed as the old rerun it
+replaces: the long lane about 395 s, the short lane about 410 s, the step about 410 s. That is
+a prediction, not a measured run. The issue asked for under 300 s. Its own list doesn't get
+there. The kept cases plus one boot per prefix come to about 805 s of lane time, so two lanes
+can't go much under 400 s. I keep these cases rather than cut more to reach 300.
+
+Run 44433755065's step summary didn't upload. GitHub takes 1024k, and the step wrote 1220k,
+about 172k of it for each `counters` or `slots` case, all reads.
+`stats` now prints each read's first 20 lines. The whole files are in the artifact. Each lane's
+summary ends with a table of its cases, with each set named.
+
 ## Consequences
 
 - Every case still runs once, except `smoke-log` and its report `hardware-tso`. `counters_check`
@@ -41,8 +67,8 @@ setup.
   30 to 120 times a healthy case. `tsoqueue` counts how many items arrive in its 10 s, so it now
   counts fewer: 39,087,034 in run 44016265366, against 99,350,136 in run 44012662403. Nothing
   fails on that.
-- The two lanes add up to about 930 s of work. Moving a case from one lane to the other can't
-  bring the step reliably under 480 s.
+- In run 44016265366, before the two sets, the two lanes added up to about 930 s of work.
+  Moving a case from one lane to the other couldn't bring the step reliably under 480 s then.
 - The summary has the long lane's block last, after "Reports".
 - The `build` job's 45 minutes and `hang`'s 10 s from ADR 0006 stay. The lanes landed after that
   change had a green run, run 44012662403.
@@ -59,7 +85,8 @@ setup.
 
 ## Evidence
 
-- jdrly/gw2-on-mac #235.
+- jdrly/gw2-on-mac #235, and #325 for the two sets.
+- Run 44433755065 and its `engine-tests` artifact for the lane times before the two sets.
 - Run 43769470898 for the cases' times, and the job's first step for the runner's 3 CPUs. Runs
   43994927356, 44009162480 and 44012662403 for the three latest steps in a row. Run 44016265366
   for the first one with lanes.
