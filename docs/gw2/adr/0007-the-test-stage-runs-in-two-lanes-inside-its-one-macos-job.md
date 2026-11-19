@@ -28,20 +28,22 @@ setup.
 jdrly/gw2-on-mac#325. In run 44433755065 the step took 487 s. The file times in its
 `engine-tests` artifact put the short lane at about 486 s and the long lane at about 466 s, so
 both lanes set the step's length. Of its 89 cases, the reruns of nine programs under four sets
-of my switches (`lookup-off`, `compilelock`, `cuts`, `dev`) took about 400 s of program time.
-The CI audit of 2026-11-19 found no run in which one of them failed.
+of my switches (`lookup-off`, `compilelock`, `cuts`, `dev`) took about 315 s of program time,
+and smaller reruns about 80 s more. The CI audit of 2026-11-19 found no run in which one of
+them failed.
 
 They are two sets now, at the end of `cases.zsh`. `dev` has each of my on-or-off switches on,
 and `engine-like` has both lookups at 0. Every program that had a rerun runs once under each,
-except `counters.exe` and `codebuf.exe`, which run under `dev` only. That leaves 66 cases. The
+except `counters.exe` and `codebuf.exe`, which run under `dev` only. The three cases with only
+the dispatcher's L1 lookup off stay. That leaves 69 cases. The
 long lane takes `tsoqueue.exe` as well, so the two lanes come out about even: its four cases
 run 10 s each and read nothing from another lane's prefix.
 
 Predicted from run 44433755065's case times, with each new case timed as the old rerun it
-replaces: the long lane about 375 s, the short lane about 350 s, the step about 375 s. That is
+replaces: the long lane about 375 s, the short lane about 360 s, the step about 375 s. That is
 a prediction, not a measured run. The issue asked for under 300 s. Its own list doesn't get
-there. The kept cases plus one boot per prefix come to about 720 s of lane time, so two lanes
-can't go much under 360 s. I keep every case the issue lists rather than cut more to reach 300.
+there. The kept cases plus one boot per prefix come to about 735 s of lane time, so two lanes
+can't go much under 365 s. I keep every case the issue lists rather than cut more to reach 300.
 
 Run 44433755065's step summary didn't upload. GitHub takes 1024k, and the step wrote 1220k,
 about 172k of it for each `counters` or `slots` case, all reads.

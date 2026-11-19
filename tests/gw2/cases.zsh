@@ -285,10 +285,14 @@ if [[ $which == mine ]]; then l1lookup_check l1lookup-on on; fi
 
 # Single steps and int3 into code already in L1 (tests/gw2/singlestep.c): each resume goes through
 # the dispatcher, whose trap flag check has to come before its L1 lookup. Under both FEXes with
-# the switch unset, which under mine is on. With it off, single steps and Mach9's smoke test with
-# FEX_SMCCHECKS=full, whose invalidations clear L1 entries that the dispatcher reads, run in the
-# engine-like set at the end of this file.
+# the switch unset, which under mine is on, and under mine with it off. Mach9's smoke test, with
+# and without FEX_SMCCHECKS=full, whose invalidations clear L1 entries that the dispatcher reads,
+# runs above with the switch on, and here with it off. These three keep the host PC lookup on,
+# which the engine-like set at the end of this file turns off too.
 check singlestep both 60 singlestep.exe 'gw2 test singlestep: passed'
+check singlestep-l1lookup-off mine 60 singlestep.exe 'gw2 test singlestep: passed' FEX_DISPATCHERL1LOOKUP=0
+check smoke-l1lookup-off mine 40 fex.exe "$smoke" FEX_DISPATCHERL1LOOKUP=0
+check smoke-l1lookup-off-smcchecks-full mine 160 fex.exe "$smoke" FEX_DISPATCHERL1LOOKUP=0 FEX_SMCCHECKS=full
 
 # A crash shows as one (jdrly/gw2-on-mac#132). crash.exe prints one line and writes to address 16.
 # With the prefix's crash dialog off (run.zsh), winedbg --auto prints the exception and the
