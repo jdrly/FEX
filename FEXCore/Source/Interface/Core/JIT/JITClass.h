@@ -195,6 +195,8 @@ private:
   struct PendingReturnLookup {
     ARMEmitter::ForwardLabel Label;
     ARMEmitter::Register RipReg {ARMEmitter::Reg::r0};
+    // The return's guest offset, for the lookup's RIP entry
+    uint64_t GuestEntryOffset {};
   };
   fextl::vector<PendingReturnLookup> PendingReturnLookups;
 

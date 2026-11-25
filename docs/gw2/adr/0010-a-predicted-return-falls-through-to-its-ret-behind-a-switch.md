@@ -13,17 +13,21 @@ bytes it never ran:
 With `FEX_RETURNLOOKUPOUTOFLINE=1` the return is `ldp`, `sub`, `cbnz <lookup>`, `ret`, and the
 lookup goes after the unit's code, next to the link thunks, with the same instructions in the same
 order and the same `ret` at its end. A predicted return runs one taken branch less and its site is
-eight instructions shorter. A missed one takes one branch more. The idea and the code are Squark's
-FEX patch `0045` (jason5545/squark-app at `2bf62f7`, MIT like the files it changes), ported by hand
-because my #168 change sits in the same lines. Its author measured 3.19 to 2.58 ns a call with
+eight instructions shorter. A missed one takes one branch more. In a unit emitted again with far
+branches (`RequiresFarARM64Jumps`) the site's `cbnz` becomes `cbz` over a `b`, so the site is seven
+instructions shorter and a predicted return still takes one branch, over the `b`.
+
+The idea and the code are Squark's FEX patch `0045` (jason5545/squark-app at `2bf62f7`, MIT like
+the files it changes), ported by hand because my #168 change sits in the same lines. Its author measured 3.19 to 2.58 ns a call with
 4,096 small functions and 13.31 to 12.14 with 65,536, and a small loss at 16,384. Whether it helps
 GW2's game thread is for play to say (jdrly/gw2-on-mac #343).
 
 ## Consequences
 
-- Off, the JIT emits exactly what it did. The core job checks that from CodeSizeValidation's `ret`
-  block: unset has to give the same code as `=0`, and `=1` a site eight instructions shorter. Its
-  "Return site" lines are the dump of both shapes.
+- Off, the JIT emits what it did: the old path is untouched and the new one is behind the option.
+  The core job checks the default from CodeSizeValidation's `ret` block on the same build: unset has
+  to give the same return site as `=0`, and `=1` a site eight instructions shorter. Its "Return
+  site" and "Return rest" lines are the dump of both shapes.
 - A block that checks TF with `FEX_TRAPFLAGINDIRECTBRANCHES=1` keeps its path through the
   dispatcher (#168): the switch doesn't touch it. A block that checks TF without that switch takes
   the new shape like any other block, as it took the inline lookup before.
@@ -31,7 +35,9 @@ GW2's game thread is for play to say (jdrly/gw2-on-mac #343).
   `FormatVersion` goes from 57 to 58 in the branch's last commit, as for #164, #168 and #169.
 - No CPUState field moves, so `GW2Contract.h` and my Wine sampler stay as they are. The moved
   lookup lies inside its block's code, before the block's tail, so a host PC there still finds its
-  block. It reads only FEX's own state and L1, so it can't fault.
+  block. Each lookup gets a RIP entry with its return's guest offset, so a host PC in it maps to that
+  return, as it did inline, and the code after the lookups maps to the unit's last instruction, as
+  before. It reads only FEX's own state and L1, so it can't fault.
 - Tests: `tests/gw2/retlookup.c` returns with the prediction holding, to swapped and pushed
   addresses (through the dispatcher and through L1), and under single steps, with the switch off
   and on and with #168's switch. The dev rerun set has the switch on. The core job's `asm-cuts`

@@ -1174,9 +1174,13 @@ CPUBackend::CompiledCode Arm64JITCore::EmitJITCode(uint64_t Entry, uint64_t Size
 
   // GW2 on Mac (jdrly/gw2-on-mac#343): the L1 lookups of the unit's returns, for when the call-ret stack prediction
   // misses (BranchOps.cpp, ExitFunction): the instructions that otherwise follow the compare, ending in the same ret.
+  // Each gets a RIP entry with its return's guest offset, so a host PC in it maps to that return as it did inline, and
+  // the code after the last one goes back to the unit's last guest offset, as it was without them.
+  const uint64_t UnitLastGuestOffset = DebugData->GuestOpcodes.empty() ? 0 : DebugData->GuestOpcodes.back().GuestEntryOffset;
   for (auto& Lookup : PendingReturnLookups) {
     ARMEmitter::ForwardLabel l_Found;
     BindOrRestart(&Lookup.Label);
+    DebugData->GuestOpcodes.push_back({Lookup.GuestEntryOffset, GetCursorAddress<uint8_t*>() - CodeData.BlockBegin});
     ldp<ARMEmitter::IndexType::OFFSET>(TMP1, TMP2, STATE, offsetof(FEXCore::Core::CpuStateFrame, State.L1Pointer));
     and_(ARMEmitter::Size::i64Bit, TMP2, TMP2, Lookup.RipReg, ARMEmitter::ShiftType::LSL,
          FEXCore::ilog2(sizeof(LookupCache::LookupCacheEntry)));
@@ -1188,6 +1192,9 @@ CPUBackend::CompiledCode Arm64JITCore::EmitJITCode(uint64_t Entry, uint64_t Size
     str(Lookup.RipReg.X(), STATE, offsetof(FEXCore::Core::CpuStateFrame, State.rip));
     (void)Bind(&l_Found);
     ret(TMP2);
+  }
+  if (!PendingReturnLookups.empty()) {
+    DebugData->GuestOpcodes.push_back({UnitLastGuestOffset, GetCursorAddress<uint8_t*>() - CodeData.BlockBegin});
   }
 
   ARMEmitter::ForwardLabel l_ExitLink;

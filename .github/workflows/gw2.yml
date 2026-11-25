@@ -776,7 +776,7 @@ jobs:
             sed "s/^/FEX_RETURNLOOKUPOUTOFLINE=$v: /" "$out/return-$v" | tee -a "$out/totals"
           done
           off=$(sed -n 's/^Return site: \([0-9]*\) .*/\1/p' "$out/return-0") on=$(sed -n 's/^Return site: \([0-9]*\) .*/\1/p' "$out/return-1")
-          if [[ -z $off || -z $on ]] || (( off == 0 || on != off - 8 )); then
+          if [[ -z $off || -z $on ]] || (( off == 0 || on == 0 || on != off - 8 )); then
             echo "::error::a return site has to be eight instructions shorter with FEX_RETURNLOOKUPOUTOFLINE=1: ${off:-none} off, ${on:-none} on"
             status=1
           fi

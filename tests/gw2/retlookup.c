@@ -13,18 +13,24 @@
  *   - pushed: push_ret pushes push_landing and returns to it, 1,000 times. It pops its caller's
  *     pair, so its return and the landing's both miss, and the call-return stack runs one pair
  *     short each time.
- *   - step: three times, sets TF and calls tf_hold, a plain return, then tf_broken, which returns
- *     to tf_land in place of its call's return address. A vectored handler keeps TF set until
- *     tf_end. Under TF each instruction is a block that checks TF, and a single-instruction
- *     block's call pushes no prediction, so every return in it misses. With
- *     FEX_TRAPFLAGINDIRECTBRANCHES=1 such a return goes through the dispatcher as before; without
- *     it, it takes the L1 lookup, after the unit's code with the switch on. tf_run has to return 8.
+ *   - step: runs tf_s0 to tf_end 1,000 times without TF (tf_plain), so tf_s3 and tf_land are in L1
+ *     as blocks without TF checks. Then three times: sets TF and calls tf_hold, a plain return,
+ *     then tf_broken, which returns to tf_land in place of its call's return address. A vectored
+ *     handler keeps TF set until tf_end. Under TF each instruction is a block that checks TF, and a
+ *     single-instruction block's call pushes no prediction, so every return in it misses. With
+ *     FEX_TRAPFLAGINDIRECTBRANCHES=1 such a return goes through the dispatcher as before, whatever
+ *     the switch; one that took L1 instead would land in a block without TF checks and lose the
+ *     step there. Without it, it takes the L1 lookup, after the unit's code with the switch on.
+ *     tf_run and tf_plain have to return 8.
  *
  * Prints a line for each, then "gw2 test retlookup: passed" when the results hold. When every
  * step round trapped at the ten instructions from tf_s0 to tf_end, in order, and nowhere outside
  * tf_run, it also prints "gw2 test retlookup: every step round trapped as on x64". That has to
  * hold with FEX_TRAPFLAGINDIRECTBRANCHES=1. Without it, a return through L1 can land in a block
- * compiled without TF checks (jdrly/gw2-on-mac#168), so the line is printed but not required. */
+ * compiled without TF checks (jdrly/gw2-on-mac#168), so the line is printed but not required.
+ *
+ * The calls inside the assembly go to private leaf code that touches no stack slot of its caller
+ * and calls nothing, so they skip Win64's home space and stack alignment. */
 #include <stdint.h>
 #include <stdio.h>
 #include <windows.h>
@@ -33,6 +39,7 @@ int ret_hold(int x);
 int broken_call(int k);
 int push_ret(int k);
 int tf_run(void);
+int tf_plain(void);
 void tf_s0(void), tf_s2(void), tf_s3(void), tf_hold(void), tf_broken(void), tf_b1(void), tf_b2(void), tf_b3(void),
     tf_land(void), tf_end(void);
 
@@ -74,7 +81,11 @@ __asm__(".text\n"
         "push_landing:\n"
         "    addl $1000, %eax\n"
         "    ret\n"
-        /* tf_run: TF on, a plain return, a return to tf_land, then TF off at tf_end (the handler) */
+        /* tf_run: TF on, a plain return, a return to tf_land, then TF off at tf_end (the handler).
+         * tf_plain: the same from tf_s0, without TF. */
+        ".globl tf_plain\n"
+        "tf_plain:\n"
+        "    jmp tf_s0\n"
         ".globl tf_run\n"
         "tf_run:\n"
         "    pushfq\n"
@@ -123,6 +134,7 @@ __asm__(".text\n"
 #define PUSHED 1000
 #define ROUNDS 3
 #define STEPS 10
+#define WARM 1000
 
 static uintptr_t seen[ROUNDS][16];
 static int seen_count[ROUNDS], round_now, steps, stray_steps;
@@ -161,15 +173,14 @@ int main(void)
     printf("gw2 test retlookup: hold: %d returns, sum %lld, wanted %lld\n", HOLDS, sum, expect);
     ok &= sum == expect;
 
-    sum = expect = 0;
+    int wrong = 0;
     for (i = 0; i < 4 * BROKEN; i++)
     {
         int k = i & 3;
-        sum += broken_call(k);
-        expect += k + 100 * (k + 1);
+        wrong += broken_call(k) != k + 100 * (k + 1);
     }
-    printf("gw2 test retlookup: broken: %d returns to 4 landings, sum %lld, wanted %lld\n", 4 * BROKEN, sum, expect);
-    ok &= sum == expect;
+    printf("gw2 test retlookup: broken: %d returns to 4 landings, %d to the wrong one\n", 4 * BROKEN, wrong);
+    ok &= !wrong;
 
     sum = expect = 0;
     for (i = 0; i < PUSHED; i++)
@@ -179,6 +190,12 @@ int main(void)
     }
     printf("gw2 test retlookup: pushed: %d returns to a pushed address, sum %lld, wanted %lld\n", PUSHED, sum, expect);
     ok &= sum == expect;
+
+    wrong = 0;
+    for (i = 0; i < WARM; i++)
+        wrong += tf_plain() != 8;
+    printf("gw2 test retlookup: warm: %d runs without TF, %d not returning 8\n", WARM, wrong);
+    ok &= !wrong;
 
     if (!AddVectoredExceptionHandler(1, handler))
     {

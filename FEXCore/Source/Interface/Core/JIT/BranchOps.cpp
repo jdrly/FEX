@@ -205,6 +205,7 @@ DEF_OP(ExitFunction) {
       // over, is emitted after the unit's code (JIT.cpp, PendingReturnLookups), the same instructions in the same order.
       auto& Lookup = PendingReturnLookups.emplace_back();
       Lookup.RipReg = RipReg;
+      Lookup.GuestEntryOffset = DebugData->GuestOpcodes.empty() ? 0 : DebugData->GuestOpcodes.back().GuestEntryOffset;
       ldp<ARMEmitter::IndexType::POST>(TMP1, TMP2, REG_CALLRET_SP, 0x10);
       sub(TMP1, TMP1, RipReg.X());
       cbnz_OrRestart(ARMEmitter::Size::i64Bit, TMP1, &Lookup.Label);
