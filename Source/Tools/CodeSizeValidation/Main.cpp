@@ -83,6 +83,7 @@ private:
 
   uint64_t CurrentRIPParse {};
   bool ConsumingDisassembly {};
+  bool KeepExit {};
   InstructionData CurrentStats {};
 
   ssize_t HeaderSize {-1};
@@ -140,7 +141,12 @@ bool CodeSizeValidation::ParseMessage(const char* Message) {
     }
     // Find the first `udf #0x420f` and remove everything from that point onward.
     auto EraseBegin = std::find(CurrentStats.second.begin(), CurrentStats.second.end(), "udf #0x420f");
-    CurrentStats.second.erase(EraseBegin, CurrentStats.second.end());
+    if (KeepExit) {
+      // The other way round: keep only what follows the marker, the instruction's exit (jdrly/gw2-on-mac#343)
+      CurrentStats.second.erase(CurrentStats.second.begin(), EraseBegin == CurrentStats.second.end() ? EraseBegin : EraseBegin + 1);
+    } else {
+      CurrentStats.second.erase(EraseBegin, CurrentStats.second.end());
+    }
     CurrentStats.first.HostCodeInstructions = CurrentStats.second.size();
     return false;
   }
@@ -190,6 +196,28 @@ void CodeSizeValidation::CalculateBaseStats(FEXCore::Context::Context* CTX, FEXC
   fextl::fmt::print("Block entry: {} instructions:", HeaderSize);
   for (const auto& Line : NOPStats.second) {
     fextl::fmt::print(" [{}]", Line.c_str());
+  }
+  fextl::fmt::print("\n");
+
+  // My fork's runner reports a return's exit with FEX_RETURNLOOKUPOUTOFLINE off and on (jdrly/gw2-on-mac#343): the
+  // return site up to its first ret, then the rest of the unit's code, the moved L1 lookup and the exit linker's address.
+  constexpr static uint8_t RET[] = {
+    0xc3,
+  };
+  KeepExit = true;
+  auto RETStats = CompileAndGetStats(CTX, Thread, RET, sizeof(RET), 1);
+  KeepExit = false;
+  const auto& Exit = RETStats.second;
+  const auto SiteEnd = std::find_if(Exit.begin(), Exit.end(), [](const fextl::string& Line) { return Line.starts_with("ret"); });
+  const size_t Site = SiteEnd == Exit.end() ? 0 : static_cast<size_t>(SiteEnd - Exit.begin()) + 1;
+  // Two lines: the rest ends in the exit linker's address, which changes from run to run
+  fextl::fmt::print("Return site: {} instructions:", Site);
+  for (size_t i = 0; i < Site; ++i) {
+    fextl::fmt::print(" [{}]", Exit[i].c_str());
+  }
+  fextl::fmt::print("\nReturn rest: {} words:", Exit.size() - Site);
+  for (size_t i = Site; i < Exit.size(); ++i) {
+    fextl::fmt::print(" [{}]", Exit[i].c_str());
   }
   fextl::fmt::print("\n");
 
@@ -545,6 +573,10 @@ int main(int argc, char** argv, char** const envp) {
   // This tool reads no environment: my fork's runner runs the listings once more with this set (jdrly/gw2-on-mac#162)
   if (const char* EntryHeaderLookup = getenv("FEX_ENTRYHEADERLOOKUP")) {
     FEXCore::Config::Set(FEXCore::Config::CONFIG_ENTRYHEADERLOOKUP, EntryHeaderLookup);
+  }
+  // and the return with this set (jdrly/gw2-on-mac#343)
+  if (const char* ReturnLookupOutOfLine = getenv("FEX_RETURNLOOKUPOUTOFLINE")) {
+    FEXCore::Config::Set(FEXCore::Config::CONFIG_RETURNLOOKUPOUTOFLINE, ReturnLookupOutOfLine);
   }
 
   // Host feature override. Only supports overriding SVE width.

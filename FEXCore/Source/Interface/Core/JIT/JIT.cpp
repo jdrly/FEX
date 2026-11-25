@@ -30,6 +30,7 @@ $end_info$
 #include <FEXCore/Utils/EnumUtils.h>
 #include <FEXCore/Utils/LogManager.h>
 #include <FEXCore/Utils/LongJump.h>
+#include <FEXCore/Utils/MathUtils.h>
 #include <FEXCore/Utils/Profiler.h>
 #include <FEXCore/Utils/SHMStats.h>
 #include <FEXCore/Utils/Telemetry.h>
@@ -906,6 +907,7 @@ CPUBackend::CompiledCode Arm64JITCore::EmitJITCode(uint64_t Entry, uint64_t Size
   JumpTargets.clear();
   CallReturnTargets.clear();
   PendingJumpThunks.clear();
+  PendingReturnLookups.clear();
   X87PCWideBinops.clear();
   JumpTargets.resize(IR->GetHeader()->BlockCount, {});
   Relocations.resize(PrevNumAllocations, FEXCore::CPU::Relocation::Default()); // Discard any relocations generated from a previous attempt
@@ -1169,6 +1171,24 @@ CPUBackend::CompiledCode Arm64JITCore::EmitJITCode(uint64_t Entry, uint64_t Size
 
   // Out of the way of the blocks, as they are rarely taken.
   EmitX87PCWideBinops();
+
+  // GW2 on Mac (jdrly/gw2-on-mac#343): the L1 lookups of the unit's returns, for when the call-ret stack prediction
+  // misses (BranchOps.cpp, ExitFunction): the instructions that otherwise follow the compare, ending in the same ret.
+  for (auto& Lookup : PendingReturnLookups) {
+    ARMEmitter::ForwardLabel l_Found;
+    BindOrRestart(&Lookup.Label);
+    ldp<ARMEmitter::IndexType::OFFSET>(TMP1, TMP2, STATE, offsetof(FEXCore::Core::CpuStateFrame, State.L1Pointer));
+    and_(ARMEmitter::Size::i64Bit, TMP2, TMP2, Lookup.RipReg, ARMEmitter::ShiftType::LSL,
+         FEXCore::ilog2(sizeof(LookupCache::LookupCacheEntry)));
+    add(TMP1, TMP1, TMP2);
+    ldp<ARMEmitter::IndexType::OFFSET>(TMP2, TMP1, TMP1, 0);
+    sub(TMP1, TMP1, Lookup.RipReg.X());
+    (void)cbz(ARMEmitter::Size::i64Bit, TMP1, &l_Found);
+    ldr(TMP2, STATE, offsetof(FEXCore::Core::CpuStateFrame, Pointers.DispatcherLoopTop));
+    str(Lookup.RipReg.X(), STATE, offsetof(FEXCore::Core::CpuStateFrame, State.rip));
+    (void)Bind(&l_Found);
+    ret(TMP2);
+  }
 
   ARMEmitter::ForwardLabel l_ExitLink;
   for (auto& PendingJumpThunk : PendingJumpThunks) {
