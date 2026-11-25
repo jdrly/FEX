@@ -7,7 +7,7 @@
       "SVE256",
       "AFP"
     ],
-    "BinaryCacheVersion": 57
+    "BinaryCacheVersion": 58
   },
   "Instructions": {
     "push fs": {
