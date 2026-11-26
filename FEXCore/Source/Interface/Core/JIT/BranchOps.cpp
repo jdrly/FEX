@@ -199,6 +199,20 @@ DEF_OP(ExitFunction) {
     // without TF checks, which loses the step at the target and leaves TF set. The dispatcher checks TF first.
     const bool ViaDispatcher = BlockChecksTF && CTX->Config.TrapFlagIndirectBranches();
 
+    if (Op->Hint == IR::BranchHint::Return && !ViaDispatcher && CTX->Config.ReturnLookupOutOfLine()) {
+      // GW2 on Mac (jdrly/gw2-on-mac#343), from Squark's FEX 0045: a return whose call-ret stack prediction holds
+      // falls through to the ret. The L1 lookup for the other case, eight instructions every such return branched
+      // over, is emitted after the unit's code (JIT.cpp, PendingReturnLookups), the same instructions in the same order.
+      auto& Lookup = PendingReturnLookups.emplace_back();
+      Lookup.RipReg = RipReg;
+      Lookup.GuestEntryOffset = DebugData->GuestOpcodes.empty() ? 0 : DebugData->GuestOpcodes.back().GuestEntryOffset;
+      ldp<ARMEmitter::IndexType::POST>(TMP1, TMP2, REG_CALLRET_SP, 0x10);
+      sub(TMP1, TMP1, RipReg.X());
+      cbnz_OrRestart(ARMEmitter::Size::i64Bit, TMP1, &Lookup.Label);
+      ret(TMP2);
+      return;
+    }
+
     if (Op->Hint == IR::BranchHint::Return) {
       // First try to pop from the call-ret stack, otherwise follow the normal path (but ending in a ret)
       ldp<ARMEmitter::IndexType::POST>(TMP1, TMP2, REG_CALLRET_SP, 0x10);
