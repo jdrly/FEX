@@ -194,27 +194,34 @@ DEF_OP(ExitFunction) {
   } else {
     ARMEmitter::ForwardLabel SkipFullLookup;
     auto RipReg = GetReg(Op->NewRIP);
+    // GW2 on Mac (jdrly/gw2-on-mac#168): in a block that checks TF, both shortcuts below can land in a block compiled
+    // without TF checks, which loses the step at the target and leaves TF set. The dispatcher checks TF first.
+    const bool ViaDispatcher = BlockChecksTF && CTX->Config.TrapFlagIndirectBranches();
 
     if (Op->Hint == IR::BranchHint::Return) {
       // First try to pop from the call-ret stack, otherwise follow the normal path (but ending in a ret)
       ldp<ARMEmitter::IndexType::POST>(TMP1, TMP2, REG_CALLRET_SP, 0x10);
+      if (!ViaDispatcher) {
+        sub(TMP1, TMP1, RipReg.X());
+        (void)cbz(ARMEmitter::Size::i64Bit, TMP1, &SkipFullLookup);
+      }
+    }
+
+    if (!ViaDispatcher) {
+      // L1 Cache
+      ldp<ARMEmitter::IndexType::OFFSET>(TMP1, TMP2, STATE, offsetof(FEXCore::Core::CpuStateFrame, State.L1Pointer));
+
+      // Calculate (tmp1 + ((ripreg & L1_ENTRIES_MASK) << 4)) for the address
+      // L1Mask is pre-shifted.
+      and_(ARMEmitter::Size::i64Bit, TMP2, TMP2, RipReg, ARMEmitter::ShiftType::LSL, FEXCore::ilog2(sizeof(LookupCache::LookupCacheEntry)));
+      add(TMP1, TMP1, TMP2);
+
+      ldp<ARMEmitter::IndexType::OFFSET>(TMP2, TMP1, TMP1, 0);
+
+      // Note: sub+cbnz used over cmp+br to preserve flags.
       sub(TMP1, TMP1, RipReg.X());
       (void)cbz(ARMEmitter::Size::i64Bit, TMP1, &SkipFullLookup);
     }
-
-    // L1 Cache
-    ldp<ARMEmitter::IndexType::OFFSET>(TMP1, TMP2, STATE, offsetof(FEXCore::Core::CpuStateFrame, State.L1Pointer));
-
-    // Calculate (tmp1 + ((ripreg & L1_ENTRIES_MASK) << 4)) for the address
-    // L1Mask is pre-shifted.
-    and_(ARMEmitter::Size::i64Bit, TMP2, TMP2, RipReg, ARMEmitter::ShiftType::LSL, FEXCore::ilog2(sizeof(LookupCache::LookupCacheEntry)));
-    add(TMP1, TMP1, TMP2);
-
-    ldp<ARMEmitter::IndexType::OFFSET>(TMP2, TMP1, TMP1, 0);
-
-    // Note: sub+cbnz used over cmp+br to preserve flags.
-    sub(TMP1, TMP1, RipReg.X());
-    (void)cbz(ARMEmitter::Size::i64Bit, TMP1, &SkipFullLookup);
     ldr(TMP2, STATE, offsetof(FEXCore::Core::CpuStateFrame, Pointers.DispatcherLoopTop));
     str(RipReg.X(), STATE, offsetof(FEXCore::Core::CpuStateFrame, State.rip));
 

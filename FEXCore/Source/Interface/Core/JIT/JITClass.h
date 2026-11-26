@@ -82,6 +82,8 @@ private:
   // In the rare case when those assumptions are broken, FEX needs to safely restart the JIT.
   RestartOptions RestartControl {};
   bool RequiresFarARM64Jumps {};
+  // The block being emitted checks TF before each instruction (EmitJITCode's CheckTF).
+  bool BlockChecksTF {};
   // Default to 6 instructions per SSA node.
   uint32_t SSANodeMultiplier {24};
 
