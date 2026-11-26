@@ -407,16 +407,6 @@ check smoke-noavx-lookups-off mine 40 fex.exe "$smoke" $noavx $lookupsoff
 stepped='gw2 test singlestep: every round trapped at step_after, no stray steps'
 check singlestep-trapflag mine 60 singlestep.exe "$stepped" FEX_TRAPFLAGINDIRECTBRANCHES=1
 
-# jdrly/gw2-on-mac#169: FEX_CONDBACKEDGESUSPEND, a suspend check on the taken side of a conditional
-# branch back to an earlier instruction. condloop.exe (tests/gw2/condloop.c) spins a thread in loops
-# closed by je and jp back. Without the switch, under both FEXes, its je loop isn't suspended within
-# 2 seconds, and the pending suspend takes the thread once a stop flag lets it out. With it, under
-# mine, each loop is suspended at its head, the je loop 1,000 times.
-condloop='gw2 test condloop: passed'
-backedge=FEX_CONDBACKEDGESUSPEND=1
-check condloop-off both 60 condloop.exe "$condloop" GW2_CONDLOOP_EXPECT=hang
-check condloop-on mine 120 condloop.exe "$condloop" GW2_CONDLOOP_EXPECT=suspend $backedge
-
 # jdrly/gw2-on-mac#343: FEX_RETURNLOOKUPOUTOFLINE, under which a return the call-return stack
 # predicts falls through to its ret and the L1 lookup for the others sits after the unit's code.
 # retlookup.exe (tests/gw2/retlookup.c) returns with the prediction holding, to swapped and pushed
@@ -435,10 +425,10 @@ check retlookup-on-trapflag mine 60 retlookup.exe "$retstepped" $retout FEX_TRAP
 
 # The two rerun sets (jdrly/gw2-on-mac#325), under mine only. Every program whose cases ran again
 # under a set of my switches runs once under each:
-#   dev          each of my on-or-off switches on: the back-edge suspend (#169), the compile lock
-#                (#165), both lookups (#161, #162), #164's two, the trap flag's (#168) and the
-#                return lookup's (#343). The values of the others that dev-switches.conf sets
-#                (128 MB, keep, a fixed L1, disableavx) have cases of their own above.
+#   dev          each of my on-or-off switches on: the compile lock (#165), both lookups (#161,
+#                #162), #164's two, the trap flag's (#168) and the return lookup's (#343). The
+#                values of the others that dev-switches.conf sets (128 MB, keep, a fixed L1,
+#                disableavx) have cases of their own above.
 #   engine-like  both lookups at 0, as the engine's FEX finds blocks. A release build of my app
 #                runs the engine's FEX, so this is the path players run.
 # Each case is a base case above with the set's variables added, and its label is the base case's
@@ -446,9 +436,8 @@ check retlookup-on-trapflag mine 60 retlookup.exe "$retstepped" $retout FEX_TRAP
 # step_after in both sets: dev has #168's switch, and engine-like runs singlestep-trapflag. avx
 # runs hidden in both. Each set runs Mach9's smoke test and entryfault once, one of them with
 # FEX_SMCCHECKS=full: FEX's default mode finds a write into code by the page's fault, full
-# checks each block, so each set has both. condloop under engine-like runs without the back-edge
-# suspend, so its je loop has to hang. entryfault's fault loop closes with jb back.
-dev=($backedge $all FEX_LEA32BITADDS=1 FEX_SIGNEXTENDINGLOADS=1 FEX_TRAPFLAGINDIRECTBRANCHES=1 $retout)
+# checks each block, so each set has both.
+dev=($all FEX_LEA32BITADDS=1 FEX_SIGNEXTENDINGLOADS=1 FEX_TRAPFLAGINDIRECTBRANCHES=1 $retout)
 enginelike=($lookupsoff)
 check smoke-default-dev mine 40 fex.exe "$smoke" $dev
 check smoke-smcchecks-full-engine-like mine 160 fex.exe "$smoke" $enginelike FEX_SMCCHECKS=full
@@ -478,7 +467,5 @@ check entryfault-smcchecks-full-dev mine 160 entryfault.exe "$entryfault" $dev F
 check entryfault-engine-like mine 120 entryfault.exe "$entryfault" $enginelike
 check avx-hidden-dev mine 60 avx.exe "$avx" GW2_AVX_EXPECT=hidden $noavx $dev
 check avx-hidden-engine-like mine 60 avx.exe "$avx" GW2_AVX_EXPECT=hidden $noavx $enginelike
-check condloop-dev mine 120 condloop.exe "$condloop" GW2_CONDLOOP_EXPECT=suspend $dev
-check condloop-engine-like mine 60 condloop.exe "$condloop" GW2_CONDLOOP_EXPECT=hang $enginelike
 check retlookup-dev mine 60 retlookup.exe "$retstepped" $dev
 check retlookup-engine-like mine 60 retlookup.exe "$retlookup" $enginelike

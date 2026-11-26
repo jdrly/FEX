@@ -1,6 +1,7 @@
 # Every change to what FEX does is an option that is off in the fork, and dev builds turn it on
 
-Decided 2026-11-12, narrowed 2026-11-15 and 2026-11-19 (ADR 0008). Status: accepted.
+Decided 2026-11-12, narrowed 2026-11-15 and 2026-11-19 (ADR 0008), amended 2026-11-26 (ADR 0012).
+Status: accepted.
 
 My FEX replaces the engine's for every x86_64 process, Steam and the launcher included. A change to
 what FEX does therefore sits behind a `FEX_*` option that is off by default. It is an entry in
@@ -18,10 +19,11 @@ keeps the fork's defaults.
   FEX doesn't know.
 - A change to code generation raises the disk cache's `FormatVersion` in its own bump commit, which
   stays last in the branch.
-- One option stays out of dev builds since 2026-11-15: `FEX_CONDBACKEDGESUSPEND` (jdrly/gw2-on-mac
-  #169). It adds two instructions to every taken conditional back-edge, for a hang nobody has seen
-  in the game. I asked why we were adding something that costs frames. A fix that adds work on the
-  hot path waits for a symptom seen in play. The rule is in the app's ADR on dev builds.
+- A fix that adds work on the hot path waits for a symptom seen in play, and stays out of dev
+  builds until then. The rule is in the app's ADR on dev builds. Its case, `FEX_CONDBACKEDGESUSPEND`
+  (jdrly/gw2-on-mac#169), added two instructions to every taken conditional back-edge for a hang
+  nobody had seen in the game. It stayed out from 2026-11-15, and I dropped it on 2026-11-26
+  (ADR 0012).
 - `FEX_ENTRYHEADERLOOKUP` is never on together with my Wine fork's sampler. The sampler attributes a
   sample by the block header that this option stops storing. Since it is on by default (ADR 0008), a
   sampler session sets it to 0.
