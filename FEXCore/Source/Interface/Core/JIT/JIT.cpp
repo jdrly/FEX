@@ -31,6 +31,7 @@ $end_info$
 #include <FEXCore/Utils/LogManager.h>
 #include <FEXCore/Utils/LongJump.h>
 #include <FEXCore/Utils/Profiler.h>
+#include <FEXCore/Utils/SHMStats.h>
 #include <FEXCore/Utils/Telemetry.h>
 #include <FEXCore/Utils/TypeDefines.h>
 #include <FEXCore/HLE/SyscallHandler.h>
@@ -690,6 +691,7 @@ void Arm64JITCore::ClearCache() {
 
   auto CodeBuffer = AcquireNewSharedCodeBuffer();
   ThreadState->LookupCache->ChangeGuestToHostMapping(*PrevCodeBuffer, *CodeBuffer->LookupCache, lk);
+  FEXCORE_PROFILE_INSTANT_INCREMENT(ThreadState, AccumulatedCodeBufferMoveCount, 1);
 }
 
 Arm64JITCore::~Arm64JITCore() {}
@@ -846,6 +848,7 @@ CodeBuffer::CodeBufferAllocation Arm64JITCore::AllocateCodeBufferInSharedCache(s
     Allocator::VirtualDontNeed(ThreadState->CallRetStackBase, FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE);
     auto lk = ThreadState->LookupCache->AcquireWriteLock();
     ThreadState->LookupCache->ChangeGuestToHostMapping(*Prev, *CurrentCodeBuffer->LookupCache, lk);
+    FEXCORE_PROFILE_INSTANT_INCREMENT(ThreadState, AccumulatedCodeBufferMoveCount, 1);
   }
 
   // Attempt to allocate a buffer from the SharedCodeBuffers.

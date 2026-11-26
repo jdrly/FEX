@@ -32,7 +32,7 @@ static inline uint64_t GetCycleCounter() {
 }
 #endif
 // FEXCore live-stats
-constexpr uint8_t STATS_VERSION = 2;
+constexpr uint8_t STATS_VERSION = 3;
 enum class AppType : uint8_t {
   LINUX_32,
   LINUX_64,
@@ -75,6 +75,19 @@ struct ThreadStats {
   uint64_t AccumulatedDiskCacheMissCount;
   uint64_t AccumulatedDiskCacheLookupTime;
   uint64_t Padding;
+
+  // GW2 on Mac (jdrly/gw2-on-mac#117), STATS_VERSION 3. Counted by the Windows frontend and the JIT, each only while
+  // the thread has a slot.
+  // thread_set_x86_64_compat traps that FEX issues to switch the thread's hardware TSO on or off.
+  uint64_t AccumulatedHardwareTSOSwitchCount;
+  // Exits from JIT code into native ARM64EC code (ExitFunctionEC).
+  uint64_t AccumulatedNativeExitCount;
+  // Moves of the thread to a newer code buffer: one it starts itself when its buffer is full, or one another thread
+  // started.
+  uint64_t AccumulatedCodeBufferMoveCount;
+  // Doublings and halvings of the thread's dynamic L1 lookup cache. The L1 resizes only by the lookups that miss both
+  // L1 and L2, so a program whose code fits in L2 (2,047 pages of x86 code a thread) shows none.
+  uint64_t AccumulatedL1ResizeCount;
 };
 
 // Ensure 16-byte alignment to take advantage of ARM single-copy atomicity.

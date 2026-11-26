@@ -21,6 +21,11 @@ uint32_t StatAlloc::FrontendAllocateSlots(uint32_t NewSize) {
 
   auto Result = UnixLib::AllocateSHMSlots(Base, std::min(NewSize, MAX_STATS_SIZE), MAX_STATS_SIZE);
 
+  // A failed call returns no size; the slots mapped so far are still all there are.
+  if (!Result.SHMBase) {
+    return CurrentSize;
+  }
+
   // Return the new size allocated, if it happened to change.
   return Result.MappedSize;
 }
