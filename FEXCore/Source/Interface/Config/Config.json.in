@@ -772,6 +772,107 @@
           "  * Disable TSO for multiple modules",
           "      `hl2_linux:libsdl2.so`"
         ]
+      },
+      "InitialCodeBufferMB": {
+        "Type": "uint32",
+        "Default": "16",
+        "AffectsCodeGen": "false",
+        "Desc": [
+          "Size in MB of the first code buffer: 16, 32, 64 or 128",
+          "Each time the buffer fills, all translated code is thrown away and a buffer twice the size, up to 128 MB, takes its place",
+          "Any other value logs an error and means 16"
+        ]
+      },
+      "HardwareTSOSyscalls": {
+        "Type": "uint8",
+        "Default": "FEXCore::Config::CONFIG_HARDWARETSOSYSCALLS_SWITCH",
+        "AffectsCodeGen": "false",
+        "TextDefault": "switch",
+        "ArgumentHandler": "HardwareTSOSyscallsHandler",
+        "Desc": [
+          "ARM64EC with hardware TSO switched per thread (macOS) only: what a thread does at a guest syscall.",
+          "\tswitch: Switch the thread off hardware TSO before the syscall (default)",
+          "\tkeep: Leave the thread on, which saves two traps per syscall. Unix calls still switch it off"
+        ]
+      },
+      "DispatcherL1Lookup": {
+        "Type": "bool",
+        "Default": "true",
+        "AffectsCodeGen": "false",
+        "Desc": [
+          "Makes the dispatcher look up the thread's L1 cache before it leaves for the lookup in C++.",
+          "A newly compiled block goes into L1 only, so without this every entry from outside JIT code",
+          "(native code calling an x86 callback, a return the call-return stack doesn't match) takes the lookup in C++.",
+          "On by default. 0 gives the engine's FEX's dispatcher back."
+        ]
+      },
+      "EntryHeaderLookup": {
+        "Type": "bool",
+        "Default": "true",
+        "AffectsCodeGen": "true",
+        "Desc": [
+          "A block's entry points stop storing the block's header into CPUState::InlineJITBlockHeader.",
+          "Faults, suspends, self-modifying code and the unaligned atomic handler find the block from the host PC instead.",
+          "Has no effect while EnableCodeCachingWIP is on.",
+          "On by default. 0 gives the store back, which my Wine fork's sampler needs: it reads that field."
+        ]
+      },
+      "EntryCompileLock": {
+        "Type": "bool",
+        "Default": "false",
+        "AffectsCodeGen": "false",
+        "Desc": [
+          "Threads that miss on the same guest entry at the same time compile it once: the first compiles, the others wait and find its block.",
+          "The lock is one of 1024, picked by a hash of the RIP. Generated code doesn't change.",
+          "On Windows on arm64 it also makes FEX's pool allocators read CNTVCT_EL0 for their clock instead of QueryPerformanceCounter."
+        ]
+      },
+      "Lea32BitAdds": {
+        "Type": "bool",
+        "Default": "false",
+        "AffectsCodeGen": "true",
+        "Desc": [
+          "In 64-bit mode, LEA with a 32-bit destination computes the address with 32-bit adds,",
+          "whose result is already zero-extended, instead of 64-bit adds and a 32-bit move."
+        ]
+      },
+      "SignExtendingLoads": {
+        "Type": "bool",
+        "Default": "false",
+        "AffectsCodeGen": "true",
+        "Desc": [
+          "MOVSX and MOVSXD from memory load and sign-extend in one ldrsb, ldrsh or ldrsw",
+          "when the load needs no TSO emulation, as with hardware TSO."
+        ]
+      },
+      "TrapFlagIndirectBranches": {
+        "Type": "bool",
+        "Default": "false",
+        "AffectsCodeGen": "true",
+        "Desc": [
+          "While TF is set, a return, indirect jump or indirect call goes through the dispatcher, which raises the single step at its target.",
+          "Without it, one that the call-return stack or L1 answers can jump into a block compiled without TF checks.",
+          "Then the step at the target is lost, and the program runs on with TF set until it next enters the dispatcher."
+        ]
+      },
+      "CondBackEdgeSuspend": {
+        "Type": "bool",
+        "Default": "false",
+        "AffectsCodeGen": "true",
+        "Desc": [
+          "Windows only: a conditional branch back to an earlier guest instruction checks the suspend doorbell when taken,",
+          "so a thread spinning in a loop closed by one can be suspended. A suspend there resumes at the loop's head."
+        ]
+      },
+      "ReturnLookupOutOfLine": {
+        "Type": "bool",
+        "Default": "false",
+        "AffectsCodeGen": "true",
+        "Desc": [
+          "A return that the call-return stack predicts falls through to its ret.",
+          "The L1 lookup for a return it doesn't predict moves after the unit's code, the same instructions in the same order.",
+          "A return in a block that checks TF with TrapFlagIndirectBranches on still goes through the dispatcher."
+        ]
       }
     }
   },
