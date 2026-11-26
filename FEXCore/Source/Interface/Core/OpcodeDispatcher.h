@@ -2712,6 +2712,17 @@ private:
   Ref _LoadMemGPRAutoTSO(OpSize Size, const AddressMode& A, OpSize Align = OpSize::i8Bit) {
     return _LoadMemAutoTSO(RegClass::GPR, Size, A, Align);
   }
+
+  // With SignExtendingLoads, a sign-extending load (ldrsb/ldrsh/ldrsw) of a memory operand. nullptr when the switch is
+  // off, the access must be TSO or the operand isn't memory: the caller then loads and sign-extends separately.
+  Ref LoadMemSExtIfPossible(const X86Tables::DecodedOp& Op, const X86Tables::DecodedOperand& Operand, OpSize DstSize, OpSize SrcSize) {
+    if (!CTX->Config.SignExtendingLoads() || !IsOperandMem(Operand, true) || IsTSOEnabled(RegClass::GPR)) {
+      return nullptr;
+    }
+    AddressMode A = DecodeAddress(Op, Operand, MemoryAccessType::DEFAULT, true /* IsLoad */);
+    const auto B = SelectAddressMode(this, A, GetGPROpSize(), CTX->HostFeatures.SupportsTSOImm9, false, false, SrcSize);
+    return _LoadMemSExt(DstSize, SrcSize, B.Base, B.Index, B.IndexType, B.IndexScale);
+  }
   Ref _LoadMemFPRAutoTSO(OpSize Size, const AddressMode& A, OpSize Align = OpSize::i8Bit) {
     return _LoadMemAutoTSO(RegClass::FPR, Size, A, Align);
   }

@@ -587,6 +587,14 @@
         "DestSize": "Size"
       },
 
+      "GPR = LoadMemSExt OpSize:#DstSize, OpSize:$Size, GPR:$Addr, GPR:$Offset, MemOffsetType:$OffsetType, u8:$OffsetScale": {
+        "Desc": ["Loads Size bytes (8, 16 or 32 bits) and sign-extends them to DstSize (32 or 64 bits).",
+                 "The access size must be the one named Size: offsets are inlined against it."],
+        "HasSideEffects": true,
+        "Inline": ["", "Mem"],
+        "DestSize": "DstSize"
+      },
+
       "SSA:$Value1, SSA:$Value2 = LoadMemPair RegisterClass:$Class, OpSize:#Size, GPR:$Addr, u32:$Offset": {
         "Desc": ["Load a pair of values from memory."],
         "DestSize": "Size",
