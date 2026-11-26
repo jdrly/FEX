@@ -183,6 +183,7 @@ public:
     // Try L1, no lock needed
     auto& L1Entry = reinterpret_cast<LookupCacheEntry*>(L1Pointer)[Address & L1PointerMask];
     if (L1Entry.GuestCode == Address) {
+      FEXCORE_PROFILE_INSTANT_INCREMENT(Thread, AccumulatedL1LookupHitCount, 1);
       return L1Entry.HostCode;
     }
 

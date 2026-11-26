@@ -141,6 +141,7 @@ private:
   void EmitF64FPREM1();
 
   FEX_CONFIG_OPT(DisableL2Cache, DISABLEL2CACHE);
+  FEX_CONFIG_OPT(DispatcherL1Lookup, DISPATCHERL1LOOKUP);
 };
 
 } // namespace FEXCore::CPU

@@ -12,6 +12,7 @@
 #include <FEXCore/Utils/LogManager.h>
 #include <FEXCore/Utils/SignalScopeGuards.h>
 
+#include <cstdlib>
 #include <sys/stat.h>
 
 namespace CodeSize {
@@ -185,6 +186,12 @@ void CodeSizeValidation::CalculateBaseStats(FEXCore::Context::Context* CTX, FEXC
   // Then comes the `udf #0x420f` which signifies the end of the function.
   // After that is the tail.
   HeaderSize = NOPStats.second.size();
+  // My fork's runner reports this line with FEX_ENTRYHEADERLOOKUP off and on (jdrly/gw2-on-mac#162)
+  fextl::fmt::print("Block entry: {} instructions:", HeaderSize);
+  for (const auto& Line : NOPStats.second) {
+    fextl::fmt::print(" [{}]", Line.c_str());
+  }
+  fextl::fmt::print("\n");
 
   SetupInfoDisabled = false;
 }
@@ -534,6 +541,11 @@ int main(int argc, char** argv, char** const envp) {
   FEXCore::Config::Set(FEXCore::Config::CONFIG_DISABLE_VIXL_INDIRECT_RUNTIME_CALLS, "1");
 
   FEXCore::Config::Set(FEXCore::Config::CONFIG_TSOENABLED, "0");
+
+  // This tool reads no environment: my fork's runner runs the listings once more with this set (jdrly/gw2-on-mac#162)
+  if (const char* EntryHeaderLookup = getenv("FEX_ENTRYHEADERLOOKUP")) {
+    FEXCore::Config::Set(FEXCore::Config::CONFIG_ENTRYHEADERLOOKUP, EntryHeaderLookup);
+  }
 
   // Host feature override. Only supports overriding SVE width.
   enum HostFeatures {
