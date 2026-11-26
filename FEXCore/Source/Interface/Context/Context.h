@@ -389,6 +389,7 @@ public:
     FEX_CONFIG_OPT(SignExtendingLoads, SIGNEXTENDINGLOADS);
     FEX_CONFIG_OPT(TrapFlagIndirectBranches, TRAPFLAGINDIRECTBRANCHES);
     FEX_CONFIG_OPT(CondBackEdgeSuspend, CONDBACKEDGESUSPEND);
+    FEX_CONFIG_OPT(ReturnLookupOutOfLine, RETURNLOOKUPOUTOFLINE);
   } Config;
 
   bool SoftwareRNGEnabled() const {

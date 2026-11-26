@@ -53,10 +53,12 @@
 #   (unittests/InstructionCountCI), with each listing whose numbers this commit's JIT changes. The
 #   assembly and instruction count tests run once more with FEX_ENTRYHEADERLOOKUP=0
 #   (jdrly/gw2-on-mac#162), and a block's entry, as CodeSizeValidation measures it, has to be two
-#   instructions shorter with it at 1 than at 0, and unset the same as at 1. The assembly tests run
-#   once more with #164's two switches on (FEX_LEA32BITADDS, FEX_SIGNEXTENDINGLOADS), as a dev build
-#   of my app runs them.
-#   The pass with FEX_DISPATCHERL1LOOKUP=0 and the one with #164's switches run on a push and on a
+#   instructions shorter with it at 1 than at 0, and unset the same as at 1. A return's exit, as
+#   CodeSizeValidation prints a ret block, has to be eight instructions shorter at its site with
+#   FEX_RETURNLOOKUPOUTOFLINE at 1 than at 0, and unset the same code as at 0 (jdrly/gw2-on-mac#343).
+#   The assembly tests run once more with #164's two switches and #343's on (FEX_LEA32BITADDS,
+#   FEX_SIGNEXTENDINGLOADS, FEX_RETURNLOOKUPOUTOFLINE), as a dev build of my app runs them.
+#   The pass with FEX_DISPATCHERL1LOOKUP=0 and the one with #164's and #343's switches run on a push and on a
 #   pull request that changes FEXCore/Source/Interface/Core or this workflow (jdrly/gw2-on-mac#326).
 #   FEX_CONDBACKEDGESUSPEND (#169) changes only what the JIT emits on Windows: on Linux the code is
 #   the same with it on and off, so the core job doesn't run with it. The failures are compared with tests/gw2/core-failures.txt, the
@@ -732,8 +734,9 @@ jobs:
               cat "$out/asm-l1lookup-off.diff"
               status=1
             fi
-            # #164's two switches with the lookups, as a dev build of my app runs them
-            suite asm-cuts '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_LEA32BITADDS=1 FEX_SIGNEXTENDINGLOADS=1
+            # #164's two switches and #343's with the lookups, as a dev build of my app runs them
+            suite asm-cuts '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_LEA32BITADDS=1 FEX_SIGNEXTENDINGLOADS=1 \
+              FEX_RETURNLOOKUPOUTOFLINE=1
           else
             echo "asm-l1lookup-off, asm-cuts: not run, this pull request changes neither FEXCore/Source/Interface/Core nor the workflow" |
               tee -a "$out/totals"
@@ -763,6 +766,25 @@ jobs:
             echo "::error::FEX_ENTRYHEADERLOOKUP unset has to be on: ${default:-none} unset, ${on:-none} on"
             status=1
           fi
+          # a return's exit, from CodeSizeValidation's ret block, with FEX_RETURNLOOKUPOUTOFLINE off, on and
+          # unset, which has to be off and the same code (jdrly/gw2-on-mac#343). On, the eight instructions of
+          # the L1 lookup leave the return site for the end of the unit.
+          for v in 0 1 unset; do
+            if [[ $v == unset ]]; then vars=(-u FEX_RETURNLOOKUPOUTOFLINE); else vars=("FEX_RETURNLOOKUPOUTOFLINE=$v"); fi
+            env "${vars[@]}" build/Bin/CodeSizeValidation build/unittests/InstructionCountCI/Primary.json.instcountci 2>&1 |
+              grep -E '^Return (site|rest): ' >"$out/return-$v" || true
+            sed "s/^/FEX_RETURNLOOKUPOUTOFLINE=$v: /" "$out/return-$v" | tee -a "$out/totals"
+          done
+          off=$(sed -n 's/^Return site: \([0-9]*\) .*/\1/p' "$out/return-0") on=$(sed -n 's/^Return site: \([0-9]*\) .*/\1/p' "$out/return-1")
+          if [[ -z $off || -z $on ]] || (( off == 0 || on == 0 || on != off - 8 )); then
+            echo "::error::a return site has to be eight instructions shorter with FEX_RETURNLOOKUPOUTOFLINE=1: ${off:-none} off, ${on:-none} on"
+            status=1
+          fi
+          # the site only: the rest ends in the exit linker's address, which changes from run to run
+          if ! grep '^Return site: ' "$out/return-0" >"$out/site-0" || ! grep '^Return site: ' "$out/return-unset" | cmp -s "$out/site-0" -; then
+            echo "::error::FEX_RETURNLOOKUPOUTOFLINE unset has to emit the return as at 0"
+            status=1
+          fi
           exit "$status"
       - name: Against the reference list
         if: steps.tested.outputs.docs != '1'
@@ -782,9 +804,9 @@ jobs:
             echo "::error::no reference list $ref yet"
             exit 1
           fi
-          # the suites run again with FEX_ENTRYHEADERLOOKUP=0, and with #164's switches when that
+          # the suites run again with FEX_ENTRYHEADERLOOKUP=0, and with #164's and #343's switches when that
           # pass ran, have the same reference as the default runs
-          cuts=", its asm lines also for the run with #164's switches"
+          cuts=", its asm lines also for the run with #164's and #343's switches"
           [[ $PASSES != 0 ]] || cuts=""
           LC_ALL=C sort "$ref" <(sed -n 's/^asm /asm-lookup-off /p; s/^instcountci /instcountci-lookup-off /p' "$ref") \
             <(if [[ -n $cuts ]]; then sed -n 's/^asm /asm-cuts /p' "$ref"; fi) >"$out/reference"

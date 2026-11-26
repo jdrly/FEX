@@ -189,6 +189,16 @@ private:
     uint8_t PatchSiteSize = 0;
   };
   fextl::vector<PendingJumpThunk> PendingJumpThunks;
+  // GW2 on Mac (jdrly/gw2-on-mac#343): with ReturnLookupOutOfLine, the returns whose L1 lookup (the call-ret stack
+  // prediction missed) is emitted after the unit's code, so that a predicted return falls through to its ret
+  // (BranchOps.cpp, ExitFunction).
+  struct PendingReturnLookup {
+    ARMEmitter::ForwardLabel Label;
+    ARMEmitter::Register RipReg {ARMEmitter::Reg::r0};
+    // The return's guest offset, for the lookup's RIP entry
+    uint64_t GuestEntryOffset {};
+  };
+  fextl::vector<PendingReturnLookup> PendingReturnLookups;
 
   Utils::PoolBufferWithTimedRetirement<uint8_t*, 5000, 500> TempCodeBufferAllocator;
 

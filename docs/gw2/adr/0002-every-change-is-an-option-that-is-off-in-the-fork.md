@@ -42,7 +42,7 @@ keeps the fork's defaults.
 ## Evidence
 
 - This fork's `AGENTS.md` ("Issues, commits and pull requests").
-- jdrly/gw2-on-mac #129 (dev builds), #112, #113, #161, #162, #164, #165, #118, #163, #169, #170.
+- jdrly/gw2-on-mac #129 (dev builds), #112, #113, #161, #162, #164, #165, #118, #163, #169, #170, #343.
 - jdrly/FEX PR #4, #5, #7, #8, #10, #11, #12, #14.
 - GW2 on Mac workspace `plans/night/2026-11-11-plan.md`: 2026-11-12 21:10 (Steam keeps 16 MB) and
   22:10 (everything on), 2026-11-15 00:25 (the L1 pair), 22:10 and 22:35 (dev.17, AFP), 23:50 (no

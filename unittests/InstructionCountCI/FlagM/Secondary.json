@@ -11,7 +11,7 @@
       "RPRES",
       "AFP"
     ],
-    "BinaryCacheVersion": 57
+    "BinaryCacheVersion": 58
   },
   "Instructions": {
     "ucomiss xmm0, xmm1": {

@@ -863,6 +863,16 @@
           "Windows only: a conditional branch back to an earlier guest instruction checks the suspend doorbell when taken,",
           "so a thread spinning in a loop closed by one can be suspended. A suspend there resumes at the loop's head."
         ]
+      },
+      "ReturnLookupOutOfLine": {
+        "Type": "bool",
+        "Default": "false",
+        "AffectsCodeGen": "true",
+        "Desc": [
+          "A return that the call-return stack predicts falls through to its ret.",
+          "The L1 lookup for a return it doesn't predict moves after the unit's code, the same instructions in the same order.",
+          "A return in a block that checks TF with TrapFlagIndirectBranches on still goes through the dispatcher."
+        ]
       }
     }
   },
