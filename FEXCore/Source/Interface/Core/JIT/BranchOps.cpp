@@ -272,14 +272,9 @@ DEF_OP(CondJump) {
 
   auto TrueTargetLabel = JumpTarget(Op->TrueBlock);
 
-  // Branches to Label when the condition holds, or with Invert when it doesn't.
-  const auto Branch = [&](auto* Label, bool Invert) {
-    if (Op->FromNZCV) {
-      const auto Cond = MapCC(Op->Cond);
-      b_OrRestart(Invert ? InvertCondition(Cond) : Cond, Label);
-      return;
-    }
-
+  if (Op->FromNZCV) {
+    b_OrRestart(MapCC(Op->Cond), TrueTargetLabel);
+  } else {
     uint64_t Const;
     const bool isConst = IsInlineConstant(Op->Cmp2, &Const);
 
@@ -289,57 +284,22 @@ DEF_OP(CondJump) {
     LOGMAN_THROW_A_FMT(IsGPR(Op->Cmp1), "CondJump: Expected GPR");
     LOGMAN_THROW_A_FMT(isConst, "CondJump: Expected constant source");
 
-    if (Op->Cond == IR::CondClass::EQ || Op->Cond == IR::CondClass::NEQ) {
+    if (Op->Cond == IR::CondClass::EQ) {
       LOGMAN_THROW_A_FMT(Const == 0, "CondJump: Expected 0 source");
-      if ((Op->Cond == IR::CondClass::EQ) != Invert) {
-        cbz_OrRestart(Size, Reg, Label);
-      } else {
-        cbnz_OrRestart(Size, Reg, Label);
-      }
-    } else if (Op->Cond == IR::CondClass::TSTZ || Op->Cond == IR::CondClass::TSTNZ) {
+      cbz_OrRestart(Size, Reg, TrueTargetLabel);
+    } else if (Op->Cond == IR::CondClass::NEQ) {
+      LOGMAN_THROW_A_FMT(Const == 0, "CondJump: Expected 0 source");
+      cbnz_OrRestart(Size, Reg, TrueTargetLabel);
+    } else if (Op->Cond == IR::CondClass::TSTZ) {
       LOGMAN_THROW_A_FMT(Const < 64, "CondJump: Expected valid bit source");
-      if ((Op->Cond == IR::CondClass::TSTZ) != Invert) {
-        tbz_OrRestart(Reg, Const, Label);
-      } else {
-        tbnz_OrRestart(Reg, Const, Label);
-      }
+      tbz_OrRestart(Reg, Const, TrueTargetLabel);
+    } else if (Op->Cond == IR::CondClass::TSTNZ) {
+      LOGMAN_THROW_A_FMT(Const < 64, "CondJump: Expected valid bit source");
+      tbnz_OrRestart(Reg, Const, TrueTargetLabel);
     } else {
       LOGMAN_THROW_A_FMT(false, "CondJump expected simple condition");
     }
-  };
-
-#ifdef _WIN32
-  // FEX_CONDBACKEDGESUSPEND (jdrly/gw2-on-mac#169): a loop closed by a conditional backward branch never reaches a
-  // suspend check, as the branch skips its head's entry point, so a thread spinning in it can't be suspended. With the
-  // switch, the taken side of a branch back to a guest instruction checks the doorbell before it jumps, the way an
-  // unconditional backward jump does. The check sits after the condition, not before it: the brk's RIP entry is the
-  // target's, so the suspend resumes at the loop's head and never runs the jcc again. Running it again could read flags
-  // that RedundantFlagCalculationElimination dropped once it folded the compare into a cbz.
-  // With short branches, taken: b.!cond, ldr, cbz, two instructions more than the b.cond alone. Not taken: still one
-  // branch, which now jumps over the check. Four instructions of code where there was one. With far branches
-  // (RequiresFarARM64Jumps) each conditional branch is two: taken runs two more, not taken one more, six of code for two.
-  if (CTX->Config.CondBackEdgeSuspend() && TrueTargetLabel->Backward.Location) {
-    const auto TrueBlock = IR->GetOp<IR::IROp_CodeBlock>(Op->TrueBlock);
-    // Only a block that starts a guest instruction has a RIP to resume at. The blocks an instruction makes inside
-    // itself (CreateNewCodeBlockAfter) are neither entry points nor at an offset.
-    if (TrueBlock->EntryPoint || TrueBlock->GuestEntryOffset) {
-      static constexpr uint16_t SuspendMagic {0xCAFE};
-      ARMEmitter::ForwardLabel NotTaken;
-      Branch(&NotTaken, true);
-      ldr(TMP2.W(), STATE_PTR(CpuStateFrame, SuspendDoorbell));
-      cbz_OrRestart(ARMEmitter::Size::i32Bit, TMP2, TrueTargetLabel);
-      const auto BranchRIP = DebugData->GuestOpcodes.empty() ? 0 : DebugData->GuestOpcodes.back().GuestEntryOffset;
-      DebugData->GuestOpcodes.push_back({TrueBlock->GuestEntryOffset, GetCursorAddress<uint8_t*>() - CodeData.BlockBegin});
-      brk(SuspendMagic);
-      DebugData->GuestOpcodes.push_back({BranchRIP, GetCursorAddress<uint8_t*>() - CodeData.BlockBegin});
-      BindOrRestart(&NotTaken);
-      PendingTargetLabel = JumpTarget(Op->FalseBlock);
-      return;
-    }
   }
-#endif
-
-  Branch(TrueTargetLabel, false);
 
   PendingTargetLabel = JumpTarget(Op->FalseBlock);
 }

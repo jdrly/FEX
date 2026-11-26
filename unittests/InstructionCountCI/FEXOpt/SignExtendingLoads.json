@@ -13,7 +13,7 @@
       "FLAGM2",
       "MOPS"
     ],
-    "BinaryCacheVersion": 58
+    "BinaryCacheVersion": 59
   },
   "Comment": [
     "jdrly/gw2-on-mac#164: FEX_SIGNEXTENDINGLOADS. MOVSX and MOVSXD from memory are one ldrsb, ldrsh or ldrsw when the load needs",

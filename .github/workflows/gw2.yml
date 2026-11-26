@@ -61,8 +61,7 @@
 #   FEX_SIGNEXTENDINGLOADS, FEX_RETURNLOOKUPOUTOFLINE), as a dev build of my app runs them.
 #   The pass with FEX_DISPATCHERL1LOOKUP=0 and the one with #164's and #343's switches run on a push and on a
 #   pull request that changes FEXCore/Source/Interface/Core or this workflow (jdrly/gw2-on-mac#326).
-#   FEX_CONDBACKEDGESUSPEND (#169) changes only what the JIT emits on Windows: on Linux the code is
-#   the same with it on and off, so the core job doesn't run with it. The failures are compared with tests/gw2/core-failures.txt, the
+#   The failures are compared with tests/gw2/core-failures.txt, the
 #   engine's commit's, whose lines count for the runs with the options too: a test that isn't on
 #   that list may not fail; one on it that passes now is reported.
 # Since 2026-11-12 it runs on GitHub's Xcode 27 image: macos-26 runners weren't being assigned, and I
