@@ -1,0 +1,1087 @@
+# gw2 (jdrly/gw2-on-mac#109): my FEX for Mach9 $MACH9_VERSION's engine, built on GitHub's runner the
+# way Mach9's CI built the engine's, and checked against the engine's files. Nothing here runs on
+# my Mac.
+#
+# build: the three CMake trees of Mach9's bin/build-fex.sh (.github/gw2/fex.zsh), in the engine's
+#   paths, on $RUNNER with Xcode $XCODE_VERSION, macOS 26.4 and llvm-mingw $LLVM_MINGW_VERSION,
+#   through ccache as Mach9 compiled. Each build makes libarm64ecfex.dll, libwow64fex.dll
+#   (stripped as Mach9's bundle strips them), libarm64ecfex.so and libwow64fex.so. In the trees,
+#   one after the other:
+#   - $BASE_COMMIT, the commit the engine's FEX was built from, which has to say $BASE_VERSION.
+#     .github/gw2/compare.py baseline compares each file with the engine's: the same exports and
+#     imports; the DLLs every byte but the two link times, with the build id on a line of its own;
+#     the .so files with the strict gate (jdrly/wine's byte gate) when the runner and Xcode are the
+#     engine's ($ENGINE_RUNNER, Xcode $ENGINE_XCODE_VERSION), and otherwise with the structural
+#     gate: the engine's shape and functions by name, other function bytes only a report
+#   - the same with one line of BTCpu64NotifyMemoryDirty changed (ARM64EC only): the compare has to
+#     fail on libarm64ecfex.dll alone and its listing has to name the function. Then with one line
+#     of FEXUnixLib_GetPIDHandler changed (both .so files): the object compare against the base
+#     build, with no changed input, has to fail on exactly the two FEXUnixLib.cpp objects, and with
+#     the strict gate the baseline compare on exactly the two .so files
+#   - this commit, every object compiled again, compared by compare.py patched: each object the
+#     four files link, none of whose inputs (ninja's dependency record: its source and every header
+#     the compiler read) the commit changes and whose compile command is the base's, is the base
+#     build's byte for byte; the summary lists the others with the changed inputs that touched them
+#   - this commit with callret_sp moved in CPUState: Source/Windows/Common/GW2Contract.h has to
+#     stop the build and name the constant in jdrly/wine that has to follow
+#   The function listing after a failed DLL gate only names what differs; it is not the gate.
+#   Artifact fex-arm64-<commit>: aarch64-windows/ and aarch64-unix/ as the engine has them,
+#   VERSION, LICENSE and NOTICES, kept 7 days. VERSION's line "switches: …" names every FEX_*
+#   option this commit adds to Config.json.in over the base, then each value of one of upstream's
+#   options that works only in my fork (FEX_HOSTFEATURES=disableavx, jdrly/gw2-on-mac#118). Its
+#   line "fixes: …" names the fixes of mine the app keys on (docs/gw2/adr/0011).
+#   Then, in the same job (so it stays one macOS job at a time), the test stage on the engine:
+#   the release tarball unpacked twice, once as it is and once with my libarm64ecfex.dll (also as
+#   xtajit64.dll) and libarm64ecfex.so, and tests/gw2/engine.zsh runs every case of
+#   tests/gw2/cases.zsh under each, in a scratch prefix, without a window. It runs twice at once,
+#   in the same step: the cases of counters.exe and codebuf.exe under my FEX in one lane, with a
+#   second copy of my engine, and every other case in the other (jdrly/gw2-on-mac#235).
+#   Today: Mach9's
+#   smoke/fex.c (athei/mach9 at $MACH9_COMMIT, by its sha256) in FEX's default mode and with
+#   FEX_SMCCHECKS=full; the same with FEX's log on, which says whether hardware TSO works on this
+#   runner (the summary's Reports); and tests/gw2/native/fexstats, which reads the FEX version out
+#   of FEX_PROFILESTATS's stats object: $BASE_VERSION under the engine's files, this commit's under
+#   mine.
+#   To add a test: the program as tests/gw2/<name>.c (built for Win64 x86_64 as <name>.exe, with
+#   tests/gw2/gw2test.h when the reader has to look at it) and one line in tests/gw2/cases.zsh:
+#   check (a line it has to print), stats (the same, plus a pattern the reader's last read has to
+#   match) or report (a yes or no from a case's log). engine.zsh's header says how each works.
+# core: FEX's own tests on GitHub's arm64 Linux runner ($CORE_RUNNER), FEX built natively, with
+#   FEX_DISPATCHERL1LOOKUP and FEX_ENTRYHEADERLOOKUP on, their default (jdrly/gw2-on-mac#266): the
+#   assembly tests (unittests/ASM, unittests/32Bit_ASM) with FEX_HOSTFEATURES=disablesve,disableafp,
+#   since that host has SVE and my Mac doesn't, the assembly tests again with
+#   FEX_DISPATCHERL1LOOKUP=0, whose failures have to be the first pass's, and the instruction count tests
+#   (unittests/InstructionCountCI), with each listing whose numbers this commit's JIT changes. The
+#   assembly and instruction count tests run once more with FEX_ENTRYHEADERLOOKUP=0
+#   (jdrly/gw2-on-mac#162), and a block's entry, as CodeSizeValidation measures it, has to be two
+#   instructions shorter with it at 1 than at 0, and unset the same as at 1. A return's exit, as
+#   CodeSizeValidation prints a ret block, has to be eight instructions shorter at its site with
+#   FEX_RETURNLOOKUPOUTOFLINE at 1 than at 0, and unset the same code as at 0 (jdrly/gw2-on-mac#343).
+#   The assembly tests run once more with #164's two switches and #343's on (FEX_LEA32BITADDS,
+#   FEX_SIGNEXTENDINGLOADS, FEX_RETURNLOOKUPOUTOFLINE), as a dev build of my app runs them.
+#   The pass with FEX_DISPATCHERL1LOOKUP=0 and the one with #164's and #343's switches run on a push and on a
+#   pull request that changes FEXCore/Source/Interface/Core or this workflow (jdrly/gw2-on-mac#326).
+#   FEX_CONDBACKEDGESUSPEND (#169) changes only what the JIT emits on Windows: on Linux the code is
+#   the same with it on and off, so the core job doesn't run with it. The failures are compared with tests/gw2/core-failures.txt, the
+#   engine's commit's, whose lines count for the runs with the options too: a test that isn't on
+#   that list may not fail; one on it that passes now is reported.
+# Since 2026-11-12 it runs on GitHub's Xcode 27 image: macos-26 runners weren't being assigned, and I
+# have no Mac of my own for it. Xcode 27's clang isn't the engine's, so the .so files get the
+# structural gate. Going back is one edit: RUNNER and XCODE_VERSION below to the engine's values.
+# lint: actionlint (.github/actionlint.yaml names the xcode-27 label), the Python script compiles.
+# A push whose tree a green pull request run tested, on a head that contains the push's parent (the
+#   step "Which tests this run owes", in build and in core), builds, compares and publishes as any
+#   push. In place of the test stage it runs Mach9's smoke program once under my FEX. Any other
+#   push runs everything (jdrly/gw2-on-mac#226, #242). The core job runs all of its tests on every
+#   push. A pull request whose every file is Markdown or under docs/, and none under
+#   FEXCore/Source/Interface/Core, runs the smoke program in place of the test stage, and its core
+#   job builds, so the branch's ccache stays fresh, and runs no test (jdrly/gw2-on-mac#326).
+# publish: after the others are green, packs fex-arm64-<commit>.tar.xz and prints its sha256. For a
+#   push to gw2-on-mac it adds it to the pre-release arm64-builds, the one release this workflow
+#   makes, never marked latest, and keeps the 30 newest.
+# stress: on my word only, a manual run (gh workflow run gw2.yml --repo jdrly/FEX --ref <branch>
+#   [-f fex=<commit>] [-f rounds=<n>]), which runs the jobs budget and stress and nothing else
+#   (jdrly/gw2-on-mac#132). It builds nothing of FEX: it takes the build of my FEX that a push
+#   published (fex-arm64-<commit>.tar.xz on arm64-builds) or, failing that, the artifact a pull
+#   request's run left (kept 7 days). tests/gw2/stress.zsh starts counters.exe and Mach9's smoke
+#   program under the engine's FEX, under mine (both lookups on, the default), under mine with
+#   both lookups at 0 and under mine with FEX_ENTRYCOMPILELOCK=1, with FEX_DYNAMICL1CACHE unset and at 0,
+#   for <rounds> rounds (5 unless the run says otherwise). Its time limits come from
+#   stress.zsh --budget <rounds>: the seconds after which no run starts are
+#   <rounds> times a round's planned time plus the prefixes, the step gets one longest run and a
+#   minute more, the job 5 minutes more than the step. With 16 combinations and 5 rounds that is
+#   no run after 2680 s, the step at 48 minutes and the job at 53. The summary has the table of
+#   passes, crashes and hangs and which combinations got fewer runs; the artifact stress-<run id>
+#   the logs and samples. The job budget, on Linux, works out the limits and stops the run at once
+#   when another run of this workflow is queued or running: a manual run takes no slot from a
+#   build, and a refused one never takes a macOS runner.
+name: GW2
+
+on:
+  pull_request:
+    branches: [gw2-on-mac]
+  push:
+    branches: [gw2-on-mac]
+  workflow_dispatch:
+    inputs:
+      fex:
+        description: "The commit whose build of my FEX to test (a sha or a branch). Empty: the commit this runs on"
+        required: false
+        default: ""
+      rounds:
+        description: "Runs of each program, FEX and FEX_DYNAMICL1CACHE. The time limits follow"
+        required: false
+        default: "5"
+
+permissions:
+  contents: read
+
+concurrency:
+  # a manual run has a group of its own, so it never takes the place of a push's run waiting in
+  # the group of gw2-on-mac
+  group: gw2-${{ github.event_name == 'workflow_dispatch' && format('stress-{0}', github.run_id) || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The PR's own commit, not GitHub's merge commit, so VERSION and the files' version string name it
+  COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+  # The build's scripts, from the commit this workflow file is from: on a pull request that is
+  # GitHub's merge commit (github.sha), so the workflow and the scripts it calls always agree. The
+  # source under test stays $COMMIT.
+  GW2: ${{ github.workspace }}/gw2-ci/.github/gw2
+  # athei/FEX's commit Mach9 0.4.0 was built from (the tag engine-0.4.0), where gw2-on-mac starts,
+  # and what git describe says there with athei's tags
+  BASE_COMMIT: 597e7ccbedd2b88a19c575bbad2538da447e6c3d
+  BASE_VERSION: FEX-2610-226-g597e7cc
+  # The runner and Xcode my build uses, the build job's runs-on through the anchor. With the
+  # engine's two below, the .so files get the strict gate; with any other, the structural one.
+  RUNNER: &runner xcode-27
+  XCODE_VERSION: "27.2"
+  # What Mach9's run that compiled the engine's FEX used (athei/mach9 run 43865773931; v0.4.0's
+  # release run 44031759609 took that FEX from its cache): Xcode 26.6
+  # (SDK 26.5, clang-2100.1.1.101) on the macos-26 image (macos-26-arm64 20261102.0473.1), and its
+  # pins/redist.env
+  ENGINE_RUNNER: macos-26
+  ENGINE_XCODE_VERSION: "26.6"
+  LLVM_MINGW_VERSION: "20261104"
+  LLVM_MINGW_SHA256: 66cbd5178c4a71b0d473e68ede172f8eb7d15d023e67f39201d0a69e21f6bf3c
+  MACH9_VERSION: v0.4.0
+  MACH9_SHA256: 3b81aac9b93d5652872673b400769ec525f3bc2f1f7e2ec82c9f851d0a0db05d
+  # athei/mach9's v0.4.0, and its smoke/fex.c there, for the test stage
+  MACH9_COMMIT: cc71942acedec93aa48c98fcdba73ddf0f383399
+  FEX_SMOKE_SHA256: 42352991f5867f9c401d12a7352c7fd3579cd35815843379b88c0d2985ca59ac
+  CORE_RUNNER: &core_runner ubuntu-24.04-arm
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: Build my FEX for the arm64 engine
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: *runner
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      # to find the pull request whose run tested a pushed tree
+      actions: read
+      pull-requests: read
+    # One build at a time in this repository, whatever the pull request or branch: a second one
+    # waits, and nothing in progress is cancelled by it. GitHub keeps one waiting job per group, so
+    # a third replaces the waiting one; with one push at a time (AGENTS.md) that doesn't happen.
+    concurrency:
+      group: gw2-macos-build
+      cancel-in-progress: false
+    env:
+      SRC: /Users/runner/work/mach9/mach9/src-fex
+      BUILD: /Users/runner/work/mach9/mach9/build/fex
+      MINGW_DIR: /Users/runner/llvm-mingw
+      CCACHE_DIR: /Users/runner/fex-arm64-ccache
+      CCACHE_MAXSIZE: 3G
+      ENGINE: ${{ github.workspace }}/toolchains/engine/lib/wine
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+    steps:
+      # first, so a missing Xcode stops the job within a minute
+      - name: Select Xcode
+        run: |
+          {
+            echo "### Runner"
+            echo '```'
+            echo "image $ImageOS $ImageVersion, macOS $(sw_vers -productVersion) ($(sw_vers -buildVersion)), $(sysctl -n hw.ncpu) CPUs"
+            ls -d /Applications/Xcode_*.app
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          app=/Applications/Xcode_$XCODE_VERSION.app
+          if [[ ! -d $app ]]; then
+            echo "::error::Xcode $XCODE_VERSION isn't on this runner's image ($ImageOS $ImageVersion). Pick one it has in XCODE_VERSION, or the engine's $ENGINE_XCODE_VERSION on $ENGINE_RUNNER."
+            exit 1
+          fi
+          sudo xcode-select -s "$app"
+          # the gate for the .so files: strict only with the engine's runner and Xcode
+          gate=structural
+          [[ $RUNNER == "$ENGINE_RUNNER" && $XCODE_VERSION == "$ENGINE_XCODE_VERSION" ]] && gate=strict
+          echo "SO_GATE=$gate" >>"$GITHUB_ENV"
+          echo "runner $RUNNER, Xcode $XCODE_VERSION (the engine's: $ENGINE_RUNNER, Xcode $ENGINE_XCODE_VERSION): the .so files get the $gate gate" |
+            tee -a "$GITHUB_STEP_SUMMARY"
+      # A push runs the build job's every test too, unless a green pull request run tested the
+      # same tree: then the test stage is one smoke run (jdrly/gw2-on-mac#226). A pull request's run builds the head's source, but takes this
+      # workflow and its scripts from GitHub's merge of the head into gw2-on-mac. So the tree alone
+      # isn't enough: gw2-on-mac can gain a commit and revert it while the pull request waits. The
+      # pushed commit's parent (gw2-on-mac before the push) also has to be an ancestor of the head.
+      # Then every gw2-on-mac the run could have merged was already in the head, and the run's
+      # workflow and scripts were the head's (jdrly/gw2-on-mac#242). A lookup that fails counts as
+      # "not tested". The core job runs the same step, and on a push runs all of its tests, the
+      # four assembly passes among them, whatever the lookup found (jdrly/gw2-on-mac#326).
+      # A pull request runs every test, with two exceptions (jdrly/gw2-on-mac#326,
+      # docs/gw2/adr/0009). When every file it changes is Markdown or under docs/ (docs=1), the
+      # test stage is the same smoke run and the core job only builds. When it changes nothing
+      # under FEXCore/Source/Interface/Core and not this workflow (passes=0), the core job's tests
+      # run without asm-l1lookup-off and asm-cuts. The changed paths come from GitHub's compare of
+      # the pull request's base with its head. A lookup that fails, or a list at the compare's cap
+      # of 300 files, owes everything.
+      - &tested_tree
+        name: Which tests this run owes
+        id: tested
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          green=0 docs=0 passes=1
+          if [[ $GITHUB_EVENT_NAME == pull_request ]]; then
+            # the number of files, then each changed path and a renamed file's old one
+            list=$(gh api "repos/$GH_REPO/compare/$PR_BASE...$COMMIT" \
+              -q '(.files | length), (.files[] | .filename, (.previous_filename // empty))') || list=""
+            count=$(sed -n 1p <<<"$list")
+            if [[ $count =~ ^[0-9]+$ ]] && (( count > 0 && count < 300 )); then
+              docs=1 passes=0
+              while IFS= read -r f; do
+                case $f in
+                  FEXCore/Source/Interface/Core/*|.github/workflows/gw2.yml) docs=0 passes=1 ;;
+                  *.md|docs/*) ;;
+                  *) docs=0 ;;
+                esac
+              done < <(sed 1d <<<"$list")
+              echo "pull request of $count files: docs only $docs, asm-l1lookup-off and asm-cuts $passes" |
+                tee -a "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::warning::no list of the files this pull request changes, so it runs every test" |
+                tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          elif [[ $GITHUB_EVENT_NAME == push ]]; then
+            tree=$(gh api "repos/$GH_REPO/commits/$COMMIT" -q .commit.tree.sha) || tree=""
+            parent=$(gh api "repos/$GH_REPO/commits/$COMMIT" -q '.parents[0].sha // empty') || parent=""
+            while read -r pr head; do
+              [[ -n $pr && -n $tree && -n $parent ]] || continue
+              [[ $(gh api "repos/$GH_REPO/commits/$head" -q .commit.tree.sha) == "$tree" ]] || continue
+              [[ $(gh api "repos/$GH_REPO/compare/$parent...$head" -q .status) == ahead ]] || continue
+              run=$(gh api "repos/$GH_REPO/actions/workflows/gw2.yml/runs?event=pull_request&status=success&head_sha=$head" \
+                -q '.workflow_runs[0].html_url // empty') || run=""
+              if [[ -n $run ]]; then
+                green=1
+                echo "pull request #$pr's green run tested this tree: $run" | tee -a "$GITHUB_STEP_SUMMARY"
+                break
+              fi
+            done < <(gh api "repos/$GH_REPO/commits/$COMMIT/pulls" -q '.[] | select(.merged_at != null) | "\(.number) \(.head.sha)"')
+            if (( !green )); then
+              echo "::warning::no green pull request run tested the tree of $COMMIT, so this push runs every test" |
+                tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+          { echo "green=$green"; echo "docs=$docs"; echo "passes=$passes"; } >>"$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: gw2-ci
+          sparse-checkout: .github/gw2
+          persist-credentials: false
+      - name: The scripts are this workflow's
+        run: |
+          [[ $(git -C gw2-ci rev-parse HEAD) == "$GITHUB_SHA" && -f $GW2/fex.zsh && -f $GW2/compare.py ]] ||
+            { echo "::error::the scripts of $GITHUB_SHA, the commit this workflow file is from, aren't there"; exit 1; }
+          zsh -n "$GW2/fex.zsh"
+          echo "scripts from $GITHUB_SHA, source from $COMMIT"
+      # The source, with the whole history and the fork's tags (athei's, and my lightweight
+      # engine-*, which git describe ignores), without the file contents until a checkout needs
+      # them. fex.zsh checks the submodules out.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.COMMIT }}
+          path: src
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+
+      - name: Restore Mach9
+        id: mach9
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: mach9-tarball-${{ env.MACH9_VERSION }}
+          path: toolchains/mach9.tar.xz
+      - name: Download Mach9
+        if: steps.mach9.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p toolchains
+          curl -fsSL --retry 3 -o toolchains/mach9.tar.xz \
+            "https://github.com/athei/mach9/releases/download/$MACH9_VERSION/wine-$MACH9_VERSION-macos-arm64.tar.xz"
+      - name: Save Mach9
+        if: steps.mach9.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: mach9-tarball-${{ env.MACH9_VERSION }}
+          path: toolchains/mach9.tar.xz
+      - name: Unpack the engine's FEX
+        run: |
+          echo "$MACH9_SHA256  toolchains/mach9.tar.xz" | shasum -a 256 -c
+          mkdir -p toolchains/engine
+          tar -xf toolchains/mach9.tar.xz -C toolchains/engine --strip-components 1 \
+            wine/lib/wine/aarch64-windows/libarm64ecfex.dll wine/lib/wine/aarch64-windows/xtajit64.dll \
+            wine/lib/wine/aarch64-windows/libwow64fex.dll wine/lib/wine/aarch64-windows/xtajit.dll \
+            wine/lib/wine/aarch64-unix/libarm64ecfex.so wine/lib/wine/aarch64-unix/libwow64fex.so
+          find "$ENGINE" -type f -exec shasum -a 256 {} +
+      # the gates against the engine's files changed by hand, and the object compare on made-up records
+      - name: The compare's self-test
+        run: python3 -I "$GW2/compare.py" selftest "$ENGINE"
+
+      - name: Restore llvm-mingw
+        id: mingw
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: llvm-mingw-${{ env.LLVM_MINGW_VERSION }}
+          path: ${{ env.MINGW_DIR }}
+      - name: Download llvm-mingw
+        if: steps.mingw.outputs.cache-hit != 'true'
+        run: |
+          f="llvm-mingw-$LLVM_MINGW_VERSION-ucrt-macos-universal.tar.xz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$f" "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_VERSION/$f"
+          echo "$LLVM_MINGW_SHA256  $RUNNER_TEMP/$f" | shasum -a 256 -c
+          mkdir -p "$MINGW_DIR"
+          tar -xf "$RUNNER_TEMP/$f" -C "$MINGW_DIR" --strip-components 1
+      - name: Save llvm-mingw
+        if: steps.mingw.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: llvm-mingw-${{ env.LLVM_MINGW_VERSION }}
+          path: ${{ env.MINGW_DIR }}
+
+      # Mach9's pins/brew-formulae, as far as build-fex.sh uses them
+      - name: Install Homebrew's cmake, ninja and ccache
+        run: |
+          brew install cmake ninja ccache
+          {
+            echo "### Toolchain"
+            echo '```'
+            xcodebuild -version | sed -n 1p
+            echo "macOS SDK $(xcrun -sdk macosx --show-sdk-version)"
+            /usr/bin/clang --version | sed -n 1p
+            echo "llvm-mingw $LLVM_MINGW_VERSION: $("$MINGW_DIR/bin/clang" --version | sed -n 1p)"
+            cmake --version | sed -n 1p
+            echo "ninja $(ninja --version)"
+            ccache --version | sed -n 1p
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Restore ccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: fex-arm64-ccache-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: fex-arm64-ccache-
+          path: ${{ env.CCACHE_DIR }}
+
+      - name: Build the engine's commit
+        id: base
+        run: |
+          mkdir -p "${SRC%/*}"
+          mv src "$SRC"
+          ccache --zero-stats
+          "$GW2/fex.zsh" checkout "$BASE_COMMIT"
+          "$GW2/fex.zsh" build "$RUNNER_TEMP/base" "$BASE_VERSION"
+          "$GW2/fex.zsh" record "$RUNNER_TEMP/base-record"
+          python3 -I "$GW2/compare.py" record "$RUNNER_TEMP/base-record" "$SRC" "$BUILD"
+          ccache --show-stats
+      - name: Baseline compare
+        id: baseline
+        run: |
+          status=0
+          python3 -I "$GW2/compare.py" baseline "$RUNNER_TEMP/base" "$ENGINE" "$SO_GATE" >"$RUNNER_TEMP/baseline.md" || status=1
+          tee -a "$GITHUB_STEP_SUMMARY" <"$RUNNER_TEMP/baseline.md"
+          exit "$status"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure() && steps.baseline.outcome == 'failure'
+        with:
+          name: baseline-${{ env.COMMIT }}
+          path: ${{ runner.temp }}/base
+          retention-days: 7
+
+      # One line of BTCpu64NotifyMemoryDirty changed (it invalidates with a flag set). Only the
+      # ARM64EC tree compiles Module.cpp, so the compare has to fail on libarm64ecfex.dll alone, and
+      # its listing has to name the function, from my unstripped build's symbols.
+      - name: The baseline compare fails on a broken DLL
+        if: ${{ !cancelled() && steps.base.outcome == 'success' }}
+        run: |
+          f=Source/Windows/ARM64EC/Module.cpp
+          sed -i '' '/^void BTCpu64NotifyMemoryDirty(/,/^}/s/, false);$/, true);/' "$SRC/$f"
+          # with "|| exit": macOS's bash 3.2 doesn't stop at a failed [[ ]] under -e
+          [[ $(git -C "$SRC" diff --numstat) == $'1\t1\t'"$f" ]] || { echo "::error::the line to change isn't in $f"; exit 1; }
+          "$GW2/fex.zsh" build "$RUNNER_TEMP/broken-dll"
+          status=0
+          python3 -I "$GW2/compare.py" baseline "$RUNNER_TEMP/broken-dll" "$ENGINE" "$SO_GATE" >"$RUNNER_TEMP/broken-dll.md" || status=$?
+          git -C "$SRC" checkout -- "$f"
+          cat "$RUNNER_TEMP/broken-dll.md"
+          # shellcheck disable=SC2016 # the backticks are the report's
+          [[ $status == 1 && $(tail -n 1 "$RUNNER_TEMP/broken-dll.md") == "failed: libarm64ecfex.dll" ]] &&
+            grep -q '^  - `[^`]*BTCpu64NotifyMemoryDirty' "$RUNNER_TEMP/broken-dll.md"
+      # One line of FEXUnixLib_GetPIDHandler changed (it returns the pid plus one). Both .so files
+      # are built from FEXUnixLib.cpp. The object compare against the base build, told that no input
+      # changed, has to fail on exactly the two FEXUnixLib.cpp objects, whatever the gate. The
+      # strict gate also has to fail on exactly the two .so files; the structural one passes, since
+      # other function bytes are only its report.
+      - name: The compares fail on a broken .so
+        if: ${{ !cancelled() && steps.base.outcome == 'success' }}
+        run: |
+          f=Source/Windows/UnixLib/FEXUnixLib.cpp
+          sed -i '' '/^static NTSTATUS FEXUnixLib_GetPIDHandler(/,/^}/s/= ::getpid();$/= ::getpid() + 1;/' "$SRC/$f"
+          [[ $(git -C "$SRC" diff --numstat) == $'1\t1\t'"$f" ]] || { echo "::error::the line to change isn't in $f"; exit 1; }
+          "$GW2/fex.zsh" build "$RUNNER_TEMP/broken-so"
+          "$GW2/fex.zsh" record "$RUNNER_TEMP/broken-so-record"
+          python3 -I "$GW2/compare.py" record "$RUNNER_TEMP/broken-so-record" "$SRC" "$BUILD"
+          status=0 ostatus=0
+          python3 -I "$GW2/compare.py" baseline "$RUNNER_TEMP/broken-so" "$ENGINE" "$SO_GATE" >"$RUNNER_TEMP/broken-so.md" || status=$?
+          python3 -I "$GW2/compare.py" patched "$RUNNER_TEMP/broken-so" "$ENGINE" "$RUNNER_TEMP/base-record" \
+            "$RUNNER_TEMP/broken-so-record" >"$RUNNER_TEMP/broken-so-objects.md" || ostatus=$?
+          git -C "$SRC" checkout -- "$f"
+          cat "$RUNNER_TEMP/broken-so.md" "$RUNNER_TEMP/broken-so-objects.md"
+          fails=$(grep -F -- '- **FAIL**: ' "$RUNNER_TEMP/broken-so-objects.md" || true)
+          [[ $ostatus == 1 && $(printf '%s\n' "$fails" | grep -c .) == 2 ]] &&
+            grep -qF 'unixlib/CMakeFiles/arm64ecfex_unixlib.dir/FEXUnixLib.cpp.o' <<<"$fails" &&
+            grep -qF 'unixlib/CMakeFiles/wow64fex_unixlib.dir/FEXUnixLib.cpp.o' <<<"$fails" || exit 1
+          if [[ $SO_GATE == strict ]]; then
+            [[ $status == 1 && $(tail -n 1 "$RUNNER_TEMP/broken-so.md") == "failed: libarm64ecfex.so libwow64fex.so" ]]
+          else
+            [[ $status == 0 ]]
+          fi
+
+      - name: Build this commit
+        id: head
+        if: ${{ !cancelled() && steps.base.outcome == 'success' }}
+        run: |
+          "$GW2/fex.zsh" checkout "$COMMIT"
+          # every object compiled again, so none compared is one the base build left behind
+          since=$(date +%s)
+          find "$BUILD"/{wow64,arm64ec,unixlib} -type f \( -name '*.obj' -o -name '*.o' \) -delete
+          "$GW2/fex.zsh" build "$RUNNER_TEMP/head"
+          "$GW2/fex.zsh" record "$RUNNER_TEMP/head-record"
+          python3 -I "$GW2/compare.py" record "$RUNNER_TEMP/head-record" "$SRC" "$BUILD" "$since"
+          ccache --show-stats
+      - name: Compare
+        id: compare
+        if: ${{ !cancelled() && steps.head.outcome == 'success' }}
+        run: |
+          changed=()
+          while IFS= read -r f; do changed+=("$f"); done < <(git -C "$SRC" diff --name-only "$BASE_COMMIT" "$COMMIT")
+          status=0
+          python3 -I "$GW2/compare.py" patched "$RUNNER_TEMP/head" "$ENGINE" "$RUNNER_TEMP/base-record" "$RUNNER_TEMP/head-record" \
+            "${changed[@]}" >"$RUNNER_TEMP/compare.md" || status=1
+          tee -a "$GITHUB_STEP_SUMMARY" <"$RUNNER_TEMP/compare.md"
+          exit "$status"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure() && steps.compare.outcome == 'failure'
+        with:
+          name: compared-${{ env.COMMIT }}
+          path: ${{ runner.temp }}/head
+          retention-days: 7
+
+      # dist/fex: the four files in the engine's layout, VERSION, FEX's licence and the notices of
+      # what they are built from
+      - name: Stage
+        id: stage
+        if: ${{ !cancelled() && steps.compare.outcome == 'success' }}
+        run: |
+          dist=dist/fex
+          mkdir -p "$dist"
+          cp -R "$RUNNER_TEMP/head/aarch64-windows" "$RUNNER_TEMP/head/aarch64-unix" "$dist/"
+          cp "$SRC/LICENSE" "$dist/LICENSE"
+          echo "notices for: $(RECORD=$RUNNER_TEMP/head-record "$GW2/fex.zsh" notices "$dist/NOTICES")"
+          # "switches: …": the FEX_* options this commit's Config.json.in has and the base's hasn't,
+          # then the values of upstream's options that only my fork honours. The engine's FEX turns
+          # AVX back on after FEX_HOSTFEATURES (jdrly/gw2-on-mac#118).
+          switches=$(python3 -I -c '
+          import json, subprocess, sys
+          src, base = sys.argv[1:]
+          path = "FEXCore/Source/Interface/Config/Config.json.in"
+          names = lambda d: {"FEX_" + n.upper() for group in d["Options"].values() for n in group}
+          head = json.load(open(f"{src}/{path}"))
+          old = json.loads(subprocess.run(["git", "-C", src, "show", f"{base}:{path}"], check=True, capture_output=True).stdout)
+          print(" ".join(sorted(names(head) - names(old)) + ["FEX_HOSTFEATURES=disableavx"]))' "$SRC" "$BASE_COMMIT")
+          format=$(sed -n 's/^ *static constexpr uint16_t FormatVersion = \([0-9]*\);$/\1/p' "$SRC/FEXCore/Source/Interface/Core/DiskCache.h")
+          [[ -n $format ]] || { echo "::error::no FormatVersion in DiskCache.h"; exit 1; }
+          {
+            LC_ALL=C grep -aoE 'FEX-[0-9]+(\.[0-9]+)?-[0-9]+-g[0-9a-f]{7,}' "$dist/aarch64-windows/libarm64ecfex.dll" | sort -u
+            echo "commit: $COMMIT"
+            echo "switches:${switches:+ $switches}"
+            # "fixes: …": the fixes of mine the app keys on (ADR 0011). profilestats-slots: with
+            # FEX_PROFILESTATS every thread gets a slot on macOS (jdrly/gw2-on-mac#117, #139); the
+            # engine's FEX faults at the 37th thread there (#344). The test stage's slots.exe case checks it.
+            echo "fixes: profilestats-slots"
+            grep '^baseline: ' "$RUNNER_TEMP/baseline.md"
+            echo "base: $BASE_COMMIT ($BASE_VERSION, athei/FEX, the tag engine-${MACH9_VERSION#v})"
+            echo "engine: Mach9 $MACH9_VERSION (wine-$MACH9_VERSION-macos-arm64.tar.xz, sha256 $MACH9_SHA256)"
+            echo "toolchain: $RUNNER ($ImageOS $ImageVersion), Xcode $(xcodebuild -version | sed -n 's/^Xcode //p') (macOS SDK $(xcrun -sdk macosx --show-sdk-version)), $(/usr/bin/clang --version | sed -n 1p), llvm-mingw $LLVM_MINGW_VERSION ($("$MINGW_DIR/bin/clang" --version | sed -n 1p)), $(cmake --version | sed -n 1p), ninja $(ninja --version), macOS 26.4"
+            for f in aarch64-windows/libarm64ecfex.dll aarch64-windows/libwow64fex.dll aarch64-unix/libarm64ecfex.so aarch64-unix/libwow64fex.so; do
+              echo "$f: sha256 $(shasum -a 256 "$dist/$f" | cut -d' ' -f1)"
+            done
+            echo "libarm64ecfex.dll: $(python3 -I "$GW2/compare.py" info "$dist/aarch64-windows/libarm64ecfex.dll")"
+            echo "disk cache: FormatVersion $format"
+            echo
+            cat "$RUNNER_TEMP/baseline.md"
+            echo
+            cat "$RUNNER_TEMP/compare.md"
+          } >"$dist/VERSION"
+          cat "$dist/VERSION"
+          ls -lR "$dist"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() && steps.stage.outcome == 'success' }}
+        with:
+          name: fex-arm64-${{ env.COMMIT }}
+          path: dist/fex
+          retention-days: 7
+          if-no-files-found: error
+
+      # The test stage's programs: Mach9's smoke/fex.c and each tests/gw2/*.c for Win64 x86_64 with
+      # llvm-mingw, and fexstats natively against this commit's FEX headers
+      - name: The test stage's programs
+        id: programs
+        if: ${{ !cancelled() && steps.stage.outcome == 'success' }}
+        run: |
+          t=$RUNNER_TEMP/tests
+          mkdir -p "$t"
+          curl -fsSL --retry 3 -o "$t/fex.c" "https://raw.githubusercontent.com/athei/mach9/$MACH9_COMMIT/smoke/fex.c"
+          echo "$FEX_SMOKE_SHA256  $t/fex.c" | shasum -a 256 -c
+          # as Mach9's check_fex_runs builds it
+          "$MINGW_DIR/bin/x86_64-w64-mingw32-clang" -O2 -o "$t/fex.exe" "$t/fex.c"
+          for c in "$SRC"/tests/gw2/*.c; do
+            "$MINGW_DIR/bin/x86_64-w64-mingw32-clang" -O2 -Wall -Werror -o "$t/$(basename "$c" .c).exe" "$c"
+          done
+          # FEX's arm64 path in SHMStats.h; CMake sets ARCHITECTURE_arm64 for FEX's own builds
+          /usr/bin/clang++ -std=c++20 -O2 -Wall -Werror -DARCHITECTURE_arm64 -o "$t/fexstats" "$SRC/tests/gw2/native/fexstats.cpp" \
+            -I"$SRC/FEXCore/include" -I"$SRC/Source"
+          ls -l "$t"
+      # Two copies of the engine: its own, and one with my ARM64EC FEX (the app installs that half
+      # only; the WoW64 half stays the engine's). APFS clones, so the copy is free.
+      - name: The engine, and a copy with my FEX
+        id: engines
+        if: ${{ !cancelled() && steps.programs.outcome == 'success' }}
+        run: |
+          e=$RUNNER_TEMP/engine-own m=$RUNNER_TEMP/engine-mine
+          mkdir -p "$e"
+          tar -xf toolchains/mach9.tar.xz -C "$e"
+          cp -Rc "$e" "$m"
+          w=$m/wine/lib/wine
+          install -m 755 dist/fex/aarch64-windows/libarm64ecfex.dll "$w/aarch64-windows/libarm64ecfex.dll"
+          install -m 755 dist/fex/aarch64-windows/libarm64ecfex.dll "$w/aarch64-windows/xtajit64.dll"
+          install -m 755 dist/fex/aarch64-unix/libarm64ecfex.so "$w/aarch64-unix/libarm64ecfex.so"
+          xattr -drs com.apple.quarantine "$e" "$m"
+          for d in "$e" "$m"; do
+            shasum -a 256 "$d"/wine/lib/wine/aarch64-windows/{libarm64ecfex,xtajit64}.dll "$d"/wine/lib/wine/aarch64-unix/libarm64ecfex.so
+          done
+          "$m/wine/bin/wine" --version
+          # a second copy of mine for the long cases' lane: run.zsh tells a run's processes by the
+          # engine they run from, so two lanes need two
+          cp -Rc "$m" "$RUNNER_TEMP/engine-mine-long"
+      - name: Tests on the engine
+        id: engine-tests
+        if: ${{ !cancelled() && steps.engines.outcome == 'success' && steps.tested.outputs.green != '1' && steps.tested.outputs.docs != '1' }}
+        run: |
+          mine=$(LC_ALL=C grep -aoE 'FEX-[0-9]+(\.[0-9]+)?-[0-9]+-g[0-9a-f]{7,}' dist/fex/aarch64-windows/libarm64ecfex.dll | sort -u)
+          status=0
+          # stage <lane> <copy of my engine>: engine.zsh with that copy, in that lane (none: every case)
+          stage() {
+            GW2_LANE=$1 "$SRC/tests/gw2/engine.zsh" "$RUNNER_TEMP/engine-own/wine" "$RUNNER_TEMP/$2/wine" "$RUNNER_TEMP/tests" \
+              "$RUNNER_TEMP/engine-tests" "$BASE_VERSION" "$mine"
+          }
+          if grep -q GW2_LANE "$SRC/tests/gw2/engine.zsh"; then
+            # two lanes side by side (jdrly/gw2-on-mac#235): counters.exe and codebuf.exe under
+            # my FEX in one, every other case in the other
+            stage long engine-mine-long >"$RUNNER_TEMP/engine-tests-long.md" &
+            long=$!
+            stage short engine-mine >"$RUNNER_TEMP/engine-tests.md" || status=1
+            wait "$long" || status=1
+            cat "$RUNNER_TEMP/engine-tests-long.md" >>"$RUNNER_TEMP/engine-tests.md"
+          else
+            # a branch from before the lanes: its engine.zsh runs every case in one process
+            stage "" engine-mine >"$RUNNER_TEMP/engine-tests.md" || status=1
+          fi
+          tee -a "$GITHUB_STEP_SUMMARY" <"$RUNNER_TEMP/engine-tests.md"
+          exit "$status"
+      # The lookup found a green pull request run on this tree, so the cases ran on it there, or the
+      # pull request changes only docs. Here only that the files this run builds load and
+      # translate: Mach9's smoke program under my FEX, as the stage's smoke-default runs it.
+      - name: Smoke (a push whose tree a pull request tested, or a docs-only pull request)
+        if: ${{ !cancelled() && steps.engines.outcome == 'success' && (steps.tested.outputs.green == '1' || steps.tested.outputs.docs == '1') }}
+        run: |
+          "$SRC/tests/gw2/run.zsh" "$RUNNER_TEMP/engine-mine/wine" "$RUNNER_TEMP/engine-tests/mine" smoke-default 40 \
+            'wine-build smoke test: x86_64 FEX cases passed' "$RUNNER_TEMP/tests/fex.exe" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() && steps.engines.outcome == 'success' }}
+        with:
+          name: engine-tests-${{ env.COMMIT }}
+          # the logs and reads only: a prefix's dosdevices/z: is the whole disk
+          path: |
+            ${{ runner.temp }}/engine-tests/*/*.log
+            ${{ runner.temp }}/engine-tests/*/*.reader.*
+          retention-days: 7
+
+      # callret_sp moved one slot (swapped with _pad1, so FEX's own asserts hold): GW2Contract.h has
+      # to stop Module.cpp's compile and name the constant in jdrly/wine that has to follow. Last,
+      # since it leaves CoreState.h newer than every object.
+      - name: The contract fails a moved callret_sp
+        if: ${{ !cancelled() && steps.head.outcome == 'success' }}
+        run: |
+          f=FEXCore/include/FEXCore/Core/CoreState.h
+          perl -0pi -e 's/(  uint64_t callret_sp \{\};\n)(  uint64_t _pad1 \{\};\n)/$2$1/' "$SRC/$f"
+          [[ $(git -C "$SRC" diff --numstat) == $'1\t1\t'"$f" ]] || { echo "::error::callret_sp and _pad1 aren't where they were in $f"; exit 1; }
+          status=0
+          ninja -C "$BUILD/arm64ec" Source/Windows/ARM64EC/CMakeFiles/arm64ecfex.dir/Module.cpp.obj >"$RUNNER_TEMP/contract.log" 2>&1 || status=$?
+          git -C "$SRC" checkout -- "$f"
+          grep -E 'error|static assert' "$RUNNER_TEMP/contract.log" | tee -a "$GITHUB_STEP_SUMMARY" || true
+          [[ $status != 0 ]] && grep -qF 'HEAT_FEX_STATE_CALLRET has to follow' "$RUNNER_TEMP/contract.log"
+
+      - name: Save ccache
+        if: ${{ !cancelled() && steps.base.outcome != 'skipped' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: fex-arm64-ccache-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.CCACHE_DIR }}
+
+  core:
+    name: FEX's own tests (arm64 Linux)
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: *core_runner
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # to find the pull request whose run tested a pushed tree
+      actions: read
+      pull-requests: read
+    env:
+      CC: clang
+      CXX: clang++
+      CCACHE_DIR: /home/runner/fex-core-ccache
+      CCACHE_MAXSIZE: 2G
+      FEX_DISABLETELEMETRY: 1
+    steps:
+      - *tested_tree
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.COMMIT }}
+          persist-credentials: false
+      - name: Submodules, and the tools
+        run: |
+          git submodule update --init --depth 1
+          sudo apt-get update -q
+          sudo apt-get install -y -q clang ninja-build nasm ccache
+          {
+            echo "### Core tests' toolchain ($CORE_RUNNER)"
+            echo '```'
+            echo "$ImageOS $ImageVersion, $(nproc) CPUs: $(grep -m1 -oE 'Features.*' /proc/cpuinfo)"
+            clang --version | sed -n 1p
+            cmake --version | sed -n 1p
+            echo "ninja $(ninja --version), $(nasm -v)"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Restore ccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: fex-core-ccache-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: fex-core-ccache-
+          path: ${{ env.CCACHE_DIR }}
+      # what FEX's own CI configures for these tests (ccpp.yml, instcountci.yml at the base), without
+      # the thunks, FEXConfig and the Linux tests, which none of them uses
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=False -DENABLE_ASSERTIONS=True \
+            -DENABLE_VIXL_DISASSEMBLER=True -DBUILD_TESTING=True -DBUILD_THUNKS=False -DBUILD_FEXCONFIG=False
+          cmake --build build --target TestHarnessRunner CodeSizeValidation asm_files 32bit_asm_files instcountci_test_files
+          ccache --show-stats
+      - name: Save ccache
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: fex-core-ccache-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.CCACHE_DIR }}
+      # Each suite's failures as "<suite> <test>", from ctest's LastTestsFailed.log. A suite counts
+      # only when ctest ran it to the end: its total line ("… tests passed, F tests failed out of
+      # N") with N above 0, and F the number of tests LastTestsFailed.log lists. The instruction
+      # count tests write each listing's new numbers into the tree (FEX's instcountci_update_tests,
+      # whose own failures are on the list too), and a listing git then sees changed is one this
+      # commit's JIT generates other code for.
+      - name: Run them
+        if: steps.tested.outputs.docs != '1'
+        env:
+          PASSES: ${{ steps.tested.outputs.passes }}
+        run: |
+          out=$RUNNER_TEMP/core
+          mkdir -p "$out"
+          : >"$out/totals"
+          status=0
+          # 60 s a test: the slowest takes 10 s. At 302 s, 45 hung tests held run 43452320908 for
+          # an hour (jdrly/gw2-on-mac#233).
+          suite() {
+            local name=$1 regex=$2 rc=0 total failed
+            shift 2
+            rm -f build/Testing/Temporary/LastTestsFailed.log
+            (cd build && env "$@" ctest --no-tests=error --output-on-failure --timeout 60 -j"$(nproc)" -R "$regex" >"$out/$name.log" 2>&1) || rc=$?
+            total=$(grep -oE '[0-9]+ tests? failed out of [0-9]+' "$out/$name.log" | tail -n 1 || true)
+            echo "$name: ctest exit $rc, ${total:-no total}" | tee -a "$out/totals"
+            sed -n 's/^[0-9]*:/'"$name"' /p' build/Testing/Temporary/LastTestsFailed.log 2>/dev/null >"$out/$name.failed" || true
+            failed=$(grep -c . "$out/$name.failed" || true)
+            if [[ -z $total || ${total##* } == 0 || ${total%% *} != "$failed" ]]; then
+              echo "::error::the $name tests didn't run to the end (ctest exit $rc, ${total:-no total}, $failed in LastTestsFailed.log)"
+              tail -n 30 "$out/$name.log"
+              status=1
+            fi
+          }
+          # my two lookups are on by default (jdrly/gw2-on-mac#266), so this pass runs with both
+          suite asm '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp
+          # The next two passes only when the step "Which tests this run owes" says so: a push, or
+          # a pull request that changes FEXCore/Source/Interface/Core or this workflow
+          # (jdrly/gw2-on-mac#326). In every run since they exist they failed as the first pass did.
+          if [[ $PASSES != 0 ]]; then
+            # the same with the dispatcher's L1 lookup off (jdrly/gw2-on-mac#161): every entry of
+            # the harness goes through the dispatcher, and the switch may change no test's result,
+            # so its failures have to be the ones above. Kept out of the reference comparison as a
+            # .list.
+            suite asm-l1lookup-off '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_DISPATCHERL1LOOKUP=0
+            mv "$out/asm-l1lookup-off.failed" "$out/asm-l1lookup-off.list"
+            if ! diff <(sed 's/^asm-l1lookup-off /asm /' "$out/asm-l1lookup-off.list" | LC_ALL=C sort) <(LC_ALL=C sort "$out/asm.failed") >"$out/asm-l1lookup-off.diff"; then
+              echo "::error::the asm tests fail differently with FEX_DISPATCHERL1LOOKUP=0 (< with it, > the default)"
+              cat "$out/asm-l1lookup-off.diff"
+              status=1
+            fi
+            # #164's two switches and #343's with the lookups, as a dev build of my app runs them
+            suite asm-cuts '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_LEA32BITADDS=1 FEX_SIGNEXTENDINGLOADS=1 \
+              FEX_RETURNLOOKUPOUTOFLINE=1
+          else
+            echo "asm-l1lookup-off, asm-cuts: not run, this pull request changes neither FEXCore/Source/Interface/Core nor the workflow" |
+              tee -a "$out/totals"
+          fi
+          suite asm-lookup-off '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_ENTRYHEADERLOOKUP=0
+          suite instcountci 'InstCountCI/.*\.instcountci$'
+          suite instcountci-update 'InstCountCI/.*new_numbers$'
+          git diff --name-only -- unittests/InstructionCountCI | sed 's/^/instcountci-numbers /' >"$out/instcountci-numbers.failed"
+          # after the diff: this run writes the new numbers files too
+          suite instcountci-lookup-off 'InstCountCI/.*\.instcountci$' FEX_ENTRYHEADERLOOKUP=0
+          LC_ALL=C sort "$out"/*.failed >"$out/failures"
+          # a block's entry, from CodeSizeValidation's NOP block, with FEX_ENTRYHEADERLOOKUP off, on
+          # and unset, which has to be on
+          for v in 0 1 unset; do
+            if [[ $v == unset ]]; then vars=(-u FEX_ENTRYHEADERLOOKUP); else vars=("FEX_ENTRYHEADERLOOKUP=$v"); fi
+            env "${vars[@]}" build/Bin/CodeSizeValidation build/unittests/InstructionCountCI/Primary.json.instcountci 2>&1 |
+              grep -m 1 '^Block entry: ' >"$out/entry-$v" || true
+            echo "FEX_ENTRYHEADERLOOKUP=$v: $(cat "$out/entry-$v")" | tee -a "$out/totals"
+          done
+          off=$(sed -n 's/^Block entry: \([0-9]*\) .*/\1/p' "$out/entry-0") on=$(sed -n 's/^Block entry: \([0-9]*\) .*/\1/p' "$out/entry-1")
+          default=$(sed -n 's/^Block entry: \([0-9]*\) .*/\1/p' "$out/entry-unset")
+          if [[ -z $off || -z $on ]] || (( on != off - 2 )); then
+            echo "::error::a block's entry has to be two instructions shorter with FEX_ENTRYHEADERLOOKUP=1: ${off:-none} off, ${on:-none} on"
+            status=1
+          fi
+          if [[ -z $default || $default != "$on" ]]; then
+            echo "::error::FEX_ENTRYHEADERLOOKUP unset has to be on: ${default:-none} unset, ${on:-none} on"
+            status=1
+          fi
+          # a return's exit, from CodeSizeValidation's ret block, with FEX_RETURNLOOKUPOUTOFLINE off, on and
+          # unset, which has to be off and the same code (jdrly/gw2-on-mac#343). On, the eight instructions of
+          # the L1 lookup leave the return site for the end of the unit.
+          for v in 0 1 unset; do
+            if [[ $v == unset ]]; then vars=(-u FEX_RETURNLOOKUPOUTOFLINE); else vars=("FEX_RETURNLOOKUPOUTOFLINE=$v"); fi
+            env "${vars[@]}" build/Bin/CodeSizeValidation build/unittests/InstructionCountCI/Primary.json.instcountci 2>&1 |
+              grep -E '^Return (site|rest): ' >"$out/return-$v" || true
+            sed "s/^/FEX_RETURNLOOKUPOUTOFLINE=$v: /" "$out/return-$v" | tee -a "$out/totals"
+          done
+          off=$(sed -n 's/^Return site: \([0-9]*\) .*/\1/p' "$out/return-0") on=$(sed -n 's/^Return site: \([0-9]*\) .*/\1/p' "$out/return-1")
+          if [[ -z $off || -z $on ]] || (( off == 0 || on == 0 || on != off - 8 )); then
+            echo "::error::a return site has to be eight instructions shorter with FEX_RETURNLOOKUPOUTOFLINE=1: ${off:-none} off, ${on:-none} on"
+            status=1
+          fi
+          # the site only: the rest ends in the exit linker's address, which changes from run to run
+          if ! grep '^Return site: ' "$out/return-0" >"$out/site-0" || ! grep '^Return site: ' "$out/return-unset" | cmp -s "$out/site-0" -; then
+            echo "::error::FEX_RETURNLOOKUPOUTOFLINE unset has to emit the return as at 0"
+            status=1
+          fi
+          exit "$status"
+      - name: Against the reference list
+        if: steps.tested.outputs.docs != '1'
+        env:
+          PASSES: ${{ steps.tested.outputs.passes }}
+        run: |
+          out=$RUNNER_TEMP/core ref=tests/gw2/core-failures.txt
+          {
+            echo "### FEX's own tests"
+            echo
+            sed 's/^/- /' "$out/totals"
+            echo "- failures: $(grep -c . "$out/failures" || true)"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          if [[ ! -f $ref ]]; then
+            { echo; echo "No $ref yet. This run's list, the artifact core-failures-$COMMIT:"; echo '```'; cat "$out/failures"; echo '```'; } |
+              tee -a "$GITHUB_STEP_SUMMARY"
+            echo "::error::no reference list $ref yet"
+            exit 1
+          fi
+          # the suites run again with FEX_ENTRYHEADERLOOKUP=0, and with #164's and #343's switches when that
+          # pass ran, have the same reference as the default runs
+          cuts=", its asm lines also for the run with #164's and #343's switches"
+          [[ $PASSES != 0 ]] || cuts=""
+          LC_ALL=C sort "$ref" <(sed -n 's/^asm /asm-lookup-off /p; s/^instcountci /instcountci-lookup-off /p' "$ref") \
+            <(if [[ -n $cuts ]]; then sed -n 's/^asm /asm-cuts /p' "$ref"; fi) >"$out/reference"
+          new=$(LC_ALL=C comm -23 "$out/failures" "$out/reference")
+          fixed=$(LC_ALL=C comm -13 "$out/failures" "$out/reference")
+          {
+            if [[ -z $new && -z $fixed ]]; then
+              echo "- the same $(grep -c . "$out/reference" || true) failures as $ref, its asm and instcountci lines also for the runs with FEX_ENTRYHEADERLOOKUP=0$cuts"
+            fi
+            [[ -z $fixed ]] || { echo "- on the reference list and passing now:"; echo '```'; echo "$fixed"; echo '```'; }
+            [[ -z $new ]] || { echo "- **failing and not on the reference list:**"; echo '```'; echo "$new"; echo '```'; }
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          [[ -z $new ]]
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() && steps.tested.outputs.docs != '1' }}
+        with:
+          name: core-failures-${{ env.COMMIT }}
+          path: ${{ runner.temp }}/core
+          retention-days: 7
+
+  lint:
+    name: Lint
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.COMMIT }}
+          sparse-checkout: .github
+          persist-credentials: false
+      - name: actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          f="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$f" "https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/$f"
+          echo "$ACTIONLINT_SHA256  $RUNNER_TEMP/$f" | sha256sum -c
+          tar -xzf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color .github/workflows/gw2.yml
+      - name: Python
+        run: python3 -I -m py_compile .github/gw2/compare.py
+
+  publish:
+    name: Publish
+    needs: [build, core, lint]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    # Two pushes never upload at once: the workflow's concurrency group runs one push to gw2-on-mac
+    # at a time and never cancels it. A group of this job's own would let a pull request's pending
+    # job cancel a push's, as it did to a run of jdrly/wine's.
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE: arm64-builds
+      NAME: fex-arm64-${{ github.event.pull_request.head.sha || github.sha }}.tar.xz
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: fex-arm64-${{ env.COMMIT }}
+          path: dist/fex
+      - name: Pack
+        run: |
+          cd dist/fex
+          chmod 755 aarch64-windows aarch64-unix aarch64-windows/*.dll aarch64-unix/*.so
+          chmod 644 VERSION LICENSE NOTICES
+          tar --sort=name --owner=0 --group=0 --numeric-owner -cJf "../../$NAME" \
+            aarch64-windows aarch64-unix VERSION LICENSE NOTICES
+          cd ../..
+          tar -tvJf "$NAME"
+          sha256sum "$NAME" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Upload to the pre-release ${{ env.RELEASE }}
+        if: github.event_name == 'push' && github.ref == 'refs/heads/gw2-on-mac'
+        run: |
+          if ! gh release view "$RELEASE" >/dev/null 2>&1; then
+            gh release create "$RELEASE" --prerelease --latest=false --target "$COMMIT" --title "arm64 builds of my FEX" \
+              --notes "CI output for GW2 on Mac's arm64 line, not a release of FEX: my FEX for Mach9 $MACH9_VERSION's engine (libarm64ecfex.dll, libwow64fex.dll and their .so halves), built and checked by .github/workflows/gw2.yml for each push to gw2-on-mac. One asset per commit, fex-arm64-<full sha>.tar.xz; the 30 newest stay."
+          fi
+          id=$(gh api "repos/$GH_REPO/releases/tags/$RELEASE" -q .id)
+          uploaded=0
+          # grep without -q, which would end the pipe early and fail it under pipefail
+          if gh release view "$RELEASE" --json assets -q '.assets[].name' | grep -xF "$NAME" >/dev/null; then
+            echo "$NAME is there already, and a published file is never replaced"
+          else
+            gh release upload "$RELEASE" "$NAME"
+            uploaded=1
+          fi
+          # the 30 newest stay
+          gh api --paginate "repos/$GH_REPO/releases/$id/assets?per_page=100" -q '.[] | [.created_at, .id, .name] | @tsv' |
+            grep -P "\tfex-arm64-[0-9a-f]{40}\\.tar\\.xz\$" | sort -r | tail -n +31 | while IFS=$'\t' read -r _ asset old; do
+              echo "deleting $old"
+              gh api -X DELETE "repos/$GH_REPO/releases/assets/$asset"
+            done
+          digest=$(gh api "repos/$GH_REPO/releases/tags/$RELEASE" -q ".assets[] | select(.name == \"$NAME\") | .digest")
+          echo "$RELEASE has $NAME, $digest" | tee -a "$GITHUB_STEP_SUMMARY"
+          [[ $digest == sha256:* ]]
+          (( !uploaded )) || [[ $digest == "sha256:$(sha256sum "$NAME" | cut -d' ' -f1)" ]]
+          latest=$(gh api "repos/$GH_REPO/releases/latest" -q .tag_name 2>/dev/null || true)
+          echo "releases/latest: ${latest:-none}"
+          [[ $latest != "$RELEASE" ]]
+
+  # A manual run's jobs (jdrly/gw2-on-mac#132, #172), see the top. Not in the builds' group
+  # gw2-macos-build: GitHub keeps one waiting job per group, so a manual run waiting there could
+  # take the place of a push's build, which then never publishes. budget checks for other runs
+  # instead, and works out stress's time limits, which an expression can't compute.
+  budget:
+    name: Time limits, and no other run
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      step_minutes: ${{ steps.limits.outputs.minutes }}
+      job_minutes: ${{ steps.limits.outputs.job_minutes }}
+    env:
+      ROUNDS: ${{ inputs.rounds }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      # One run at a time in this repository (AGENTS.md). A push that comes while this runs still
+      # runs beside it. stress repeats it: its macOS runner can take a while to come, and a push
+      # can start a run meanwhile.
+      - &no_other_run
+        name: No other run
+        run: |
+          others=$(gh run list --workflow gw2.yml --limit 50 --json databaseId,status \
+            -q "[.[] | select(.databaseId != $GITHUB_RUN_ID and .status != \"completed\")] | map(.databaseId) | join(\" \")")
+          [[ -z $others ]] || { echo "::error::other runs of this workflow are queued or running: $others"; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: tests/gw2/stress.zsh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      # GitHub's Ubuntu image has no zsh
+      - name: zsh
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends zsh
+      # The step's minutes from stress.zsh; the job's other steps took under a minute with the
+      # caches there (run 43471599150), and downloading Mach9 and llvm-mingw adds a little
+      - name: Limits
+        id: limits
+        run: |
+          out=$(tests/gw2/stress.zsh --budget "$ROUNDS")
+          seconds=$(sed -n 's/^seconds=//p' <<<"$out") minutes=$(sed -n 's/^minutes=//p' <<<"$out")
+          job=$(( minutes + 5 ))
+          (( job <= 360 )) || { echo "::error::$ROUNDS rounds need $job minutes, more than the 360 GitHub gives a job"; exit 1; }
+          echo "$ROUNDS rounds: no run starts after $seconds s, the step stops at $minutes minutes, the job at $job" |
+            tee -a "$GITHUB_STEP_SUMMARY"
+          { echo "minutes=$minutes"; echo "job_minutes=$job"; } >>"$GITHUB_OUTPUT"
+
+  stress:
+    name: Crashes and hangs at process start
+    needs: budget
+    runs-on: *runner
+    timeout-minutes: ${{ fromJSON(needs.budget.outputs.job_minutes) }}
+    permissions:
+      contents: read
+      actions: read
+    env:
+      FEX: ${{ inputs.fex || github.sha }}
+      ROUNDS: ${{ inputs.rounds }}
+      MINGW_DIR: /Users/runner/llvm-mingw
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - *no_other_run
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: src
+          persist-credentials: false
+      # the build's caches, filled by its runs
+      - name: Restore Mach9
+        id: mach9
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: mach9-tarball-${{ env.MACH9_VERSION }}
+          path: toolchains/mach9.tar.xz
+      - name: Download Mach9
+        if: steps.mach9.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p toolchains
+          curl -fsSL --retry 3 -o toolchains/mach9.tar.xz \
+            "https://github.com/athei/mach9/releases/download/$MACH9_VERSION/wine-$MACH9_VERSION-macos-arm64.tar.xz"
+      - name: Restore llvm-mingw
+        id: mingw
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: llvm-mingw-${{ env.LLVM_MINGW_VERSION }}
+          path: ${{ env.MINGW_DIR }}
+      - name: Download llvm-mingw
+        if: steps.mingw.outputs.cache-hit != 'true'
+        run: |
+          f="llvm-mingw-$LLVM_MINGW_VERSION-ucrt-macos-universal.tar.xz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$f" "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_VERSION/$f"
+          echo "$LLVM_MINGW_SHA256  $RUNNER_TEMP/$f" | shasum -a 256 -c
+          mkdir -p "$MINGW_DIR"
+          tar -xf "$RUNNER_TEMP/$f" -C "$MINGW_DIR" --strip-components 1
+      # The pre-release's file of a push, or else the artifact of the newest run that left one
+      - name: My FEX
+        run: |
+          commit=$(gh api "repos/$GH_REPO/commits/$FEX" -q .sha)
+          f=fex-arm64-$commit
+          mkdir -p "$RUNNER_TEMP/fex"
+          if gh release download arm64-builds -p "$f.tar.xz" -D "$RUNNER_TEMP"; then
+            tar -xJf "$RUNNER_TEMP/$f.tar.xz" -C "$RUNNER_TEMP/fex"
+            from="$f.tar.xz on arm64-builds"
+          else
+            run=$(gh api "repos/$GH_REPO/actions/artifacts?name=$f" -q '[.artifacts[] | select(.expired | not)][0].workflow_run.id // empty')
+            [[ -n $run ]] || { echo "::error::$commit has neither $f.tar.xz on arm64-builds nor an artifact $f"; exit 1; }
+            gh run download "$run" -n "$f" -D "$RUNNER_TEMP/fex"
+            from="the artifact $f of run $run"
+          fi
+          {
+            echo "my FEX: $from"
+            echo '```'
+            sed -n 1,3p "$RUNNER_TEMP/fex/VERSION"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      # as the build job builds them
+      - name: The programs
+        run: |
+          echo "$MACH9_SHA256  toolchains/mach9.tar.xz" | shasum -a 256 -c
+          t=$RUNNER_TEMP/tests
+          mkdir -p "$t"
+          curl -fsSL --retry 3 -o "$t/fex.c" "https://raw.githubusercontent.com/athei/mach9/$MACH9_COMMIT/smoke/fex.c"
+          echo "$FEX_SMOKE_SHA256  $t/fex.c" | shasum -a 256 -c
+          "$MINGW_DIR/bin/x86_64-w64-mingw32-clang" -O2 -o "$t/fex.exe" "$t/fex.c"
+          "$MINGW_DIR/bin/x86_64-w64-mingw32-clang" -O2 -Wall -Werror -o "$t/counters.exe" src/tests/gw2/counters.c
+          /usr/bin/clang++ -std=c++20 -O2 -Wall -Werror -DARCHITECTURE_arm64 -o "$t/fexstats" src/tests/gw2/native/fexstats.cpp \
+            -Isrc/FEXCore/include -Isrc/Source
+          e=$RUNNER_TEMP/engine-own m=$RUNNER_TEMP/engine-mine
+          mkdir -p "$e"
+          tar -xf toolchains/mach9.tar.xz -C "$e"
+          cp -Rc "$e" "$m"
+          w=$m/wine/lib/wine
+          install -m 755 "$RUNNER_TEMP/fex/aarch64-windows/libarm64ecfex.dll" "$w/aarch64-windows/libarm64ecfex.dll"
+          install -m 755 "$RUNNER_TEMP/fex/aarch64-windows/libarm64ecfex.dll" "$w/aarch64-windows/xtajit64.dll"
+          install -m 755 "$RUNNER_TEMP/fex/aarch64-unix/libarm64ecfex.so" "$w/aarch64-unix/libarm64ecfex.so"
+          xattr -drs com.apple.quarantine "$e" "$m"
+      - name: Run them
+        id: run
+        timeout-minutes: ${{ fromJSON(needs.budget.outputs.step_minutes) }}
+        run: |
+          src/tests/gw2/stress.zsh "$RUNNER_TEMP/engine-own/wine" "$RUNNER_TEMP/engine-mine/wine" "$RUNNER_TEMP/tests" \
+            "$RUNNER_TEMP/stress" "$ROUNDS" "$RUNNER_TEMP/stress.md"
+      # also after the step's time limit: the table as far as it got. The limit leaves room for one
+      # run killed at its own limit, not for a prefix boot that takes run.zsh's 600 s.
+      - name: The table
+        if: always()
+        env:
+          OUTCOME: ${{ steps.run.outcome }}
+          MINUTES: ${{ needs.budget.outputs.step_minutes }}
+        run: |
+          if [[ -f $RUNNER_TEMP/stress.md ]]; then
+            tee -a "$GITHUB_STEP_SUMMARY" <"$RUNNER_TEMP/stress.md"
+            [[ $OUTCOME == success ]] ||
+              printf '\nstress.zsh did not finish: Run them ended in %s, at a limit of %s minutes. The table is where it stopped.\n' \
+                "$OUTCOME" "$MINUTES" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "no table: stress.zsh didn't start"
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: stress-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/stress/*/*.log
+            ${{ runner.temp }}/stress/*/*.reader.*
+          retention-days: 7

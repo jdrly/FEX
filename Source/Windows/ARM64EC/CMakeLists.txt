@@ -9,7 +9,9 @@ patch_library_wine(arm64ecfex)
 target_include_directories(arm64ecfex PRIVATE
   "${CMAKE_SOURCE_DIR}/Source/Windows/include/"
   "${CMAKE_SOURCE_DIR}/Source/"
-  "${CMAKE_SOURCE_DIR}/Source/Windows/")
+  "${CMAKE_SOURCE_DIR}/Source/Windows/"
+  # last, for Common/GW2Contract.h, which checks FEXCore's internal JITCodeTail
+  "${CMAKE_SOURCE_DIR}/FEXCore/Source/")
 
 target_link_libraries(arm64ecfex PRIVATE
   FEXCore_Base
