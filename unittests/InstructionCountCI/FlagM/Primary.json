@@ -10,7 +10,7 @@
       "SVE256",
       "AFP"
     ],
-    "BinaryCacheVersion": 59
+    "BinaryCacheVersion": 60
   },
   "Instructions": {
     "add bl, cl": {
