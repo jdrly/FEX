@@ -50,35 +50,7 @@ public:
   /**
    * @brief steady_clock to ensure long running applications don't hit any timeskip problems.
    */
-#if defined(_WIN32) && defined(ARCHITECTURE_arm64)
-  // GW2 on Mac (jdrly/gw2-on-mac#165): on Windows on arm64, steady_clock is QueryPerformanceCounter, a system call under
-  // Wine, and the IR, decoder and code buffer pools read the clock several times per compiled block. With
-  // EntryCompileLock, which sets Counter before the first thread compiles, read the architectural counter instead. Off,
-  // it is steady_clock's value. From MetalSharp's FEX patch 0018 (MIT):
-  // https://github.com/metalsharp/MetalSharp-Wine/blob/c06b0d2c4d58d51e4f2f4367089792b9051673ba/patches/fex/0018-FEXCore-Read-the-counter-directly-for-the-pool-alloc.patch
-  struct CounterClock {
-    using rep = int64_t;
-    using period = std::nano;
-    using duration = std::chrono::duration<rep, period>;
-    using time_point = std::chrono::time_point<CounterClock>;
-    static constexpr bool is_steady = true;
-
-    static inline std::atomic<bool> Counter {false};
-
-    static time_point now() noexcept {
-      if (!Counter.load(std::memory_order_relaxed)) {
-        return time_point(std::chrono::duration_cast<duration>(std::chrono::steady_clock::now().time_since_epoch()));
-      }
-      uint64_t Ticks, Freq;
-      __asm volatile("mrs %[Ticks], CNTVCT_EL0" : [Ticks] "=r"(Ticks));
-      __asm volatile("mrs %[Freq], CNTFRQ_EL0" : [Freq] "=r"(Freq));
-      return time_point(duration(static_cast<rep>(static_cast<unsigned __int128>(Ticks) * 1'000'000'000 / Freq)));
-    }
-  };
-  using ClockType = CounterClock;
-#else
   using ClockType = std::chrono::steady_clock;
-#endif
   /**
    * @brief Atomic flag state for letting the client know if it owns the buffer
    */
@@ -602,7 +574,7 @@ public:
     // Disowning = cheap, unclaiming = expensive
     ThreadAllocator.DisownBuffer(Info);
 
-    auto Now = FEXCore::Utils::IntrusivePooledAllocator::ClockType::now();
+    auto Now = std::chrono::steady_clock::now();
     if ((Now - Previous) >= std::chrono::duration(std::chrono::milliseconds(PeriodMS))) {
       if (CountPer < PeriodFrequency) {
         // Only unclaim the buffer if our buffer usage isn't excessive in the last period
@@ -641,6 +613,6 @@ private:
 
   // Threshold counting
   uint64_t CountPer {};
-  FEXCore::Utils::IntrusivePooledAllocator::ClockType::time_point Previous;
+  std::chrono::steady_clock::time_point Previous;
 };
 } // namespace FEXCore::Utils

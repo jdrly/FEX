@@ -817,52 +817,13 @@
           "On by default. 0 gives the store back, which my Wine fork's sampler needs: it reads that field."
         ]
       },
-      "EntryCompileLock": {
-        "Type": "bool",
-        "Default": "false",
-        "AffectsCodeGen": "false",
-        "Desc": [
-          "Threads that miss on the same guest entry at the same time compile it once: the first compiles, the others wait and find its block.",
-          "The lock is one of 1024, picked by a hash of the RIP. Generated code doesn't change.",
-          "On Windows on arm64 it also makes FEX's pool allocators read CNTVCT_EL0 for their clock instead of QueryPerformanceCounter."
-        ]
-      },
-      "Lea32BitAdds": {
-        "Type": "bool",
-        "Default": "false",
-        "AffectsCodeGen": "true",
-        "Desc": [
-          "In 64-bit mode, LEA with a 32-bit destination computes the address with 32-bit adds,",
-          "whose result is already zero-extended, instead of 64-bit adds and a 32-bit move."
-        ]
-      },
-      "SignExtendingLoads": {
-        "Type": "bool",
-        "Default": "false",
-        "AffectsCodeGen": "true",
-        "Desc": [
-          "MOVSX and MOVSXD from memory load and sign-extend in one ldrsb, ldrsh or ldrsw",
-          "when the load needs no TSO emulation, as with hardware TSO."
-        ]
-      },
-      "TrapFlagIndirectBranches": {
-        "Type": "bool",
-        "Default": "false",
-        "AffectsCodeGen": "true",
-        "Desc": [
-          "While TF is set, a return, indirect jump or indirect call goes through the dispatcher, which raises the single step at its target.",
-          "Without it, one that the call-return stack or L1 answers can jump into a block compiled without TF checks.",
-          "Then the step at the target is lost, and the program runs on with TF set until it next enters the dispatcher."
-        ]
-      },
       "ReturnLookupOutOfLine": {
         "Type": "bool",
         "Default": "false",
         "AffectsCodeGen": "true",
         "Desc": [
           "A return that the call-return stack predicts falls through to its ret.",
-          "The L1 lookup for a return it doesn't predict moves after the unit's code, the same instructions in the same order.",
-          "A return in a block that checks TF with TrapFlagIndirectBranches on still goes through the dispatcher."
+          "The L1 lookup for a return it doesn't predict moves after the unit's code, the same instructions in the same order."
         ]
       }
     }

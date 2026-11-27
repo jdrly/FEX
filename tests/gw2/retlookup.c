@@ -17,17 +17,14 @@
  *     as blocks without TF checks. Then three times: sets TF and calls tf_hold, a plain return,
  *     then tf_broken, which returns to tf_land in place of its call's return address. A vectored
  *     handler keeps TF set until tf_end. Under TF each instruction is a block that checks TF, and a
- *     single-instruction block's call pushes no prediction, so every return in it misses. With
- *     FEX_TRAPFLAGINDIRECTBRANCHES=1 such a return goes through the dispatcher as before, whatever
- *     the switch; one that took L1 instead would land in a block without TF checks and lose the
- *     step there. Without it, it takes the L1 lookup, after the unit's code with the switch on.
- *     tf_run and tf_plain have to return 8.
+ *     single-instruction block's call pushes no prediction, so every return in it misses and takes
+ *     the L1 lookup, after the unit's code with the switch on. tf_run and tf_plain have to return 8.
  *
  * Prints a line for each, then "gw2 test retlookup: passed" when the results hold. When every
  * step round trapped at the ten instructions from tf_s0 to tf_end, in order, and nowhere outside
- * tf_run, it also prints "gw2 test retlookup: every step round trapped as on x64". That has to
- * hold with FEX_TRAPFLAGINDIRECTBRANCHES=1. Without it, a return through L1 can land in a block
- * compiled without TF checks (jdrly/gw2-on-mac#168), so the line is printed but not required.
+ * tf_run, it also prints "gw2 test retlookup: every step round trapped as on x64". No case requires
+ * it: a return through L1 can land in a block compiled without TF checks and lose the step there
+ * (jdrly/gw2-on-mac#168).
  *
  * The calls inside the assembly go to private leaf code that touches no stack slot of its caller
  * and calls nothing, so they skip Win64's home space and stack alignment. */

@@ -1,10 +1,9 @@
 #!/bin/zsh
 # gw2 (jdrly/gw2-on-mac#132): how often counters.exe and Mach9's smoke program crash or hang, under
-# the engine's FEX and under mine, with FEX_DYNAMICL1CACHE unset and at 0. Mine runs three times:
-# as it is, which has FEX_ENTRYHEADERLOOKUP and FEX_DISPATCHERL1LOOKUP on (jdrly/gw2-on-mac#266),
-# with both of them at 0 ("off" in the table and the work dir), and with FEX_ENTRYCOMPILELOCK=1 and
-# both lookups on (jdrly/gw2-on-mac#165, "lock"). The manual job of .github/workflows/gw2.yml runs
-# it, on my word only.
+# the engine's FEX and under mine, with FEX_DYNAMICL1CACHE unset and at 0. Mine runs twice: as it
+# is, which has FEX_ENTRYHEADERLOOKUP and FEX_DISPATCHERL1LOOKUP on (jdrly/gw2-on-mac#266), and
+# with both of them at 0 ("off" in the table and the work dir). The manual job of
+# .github/workflows/gw2.yml runs it, on my word only.
 #
 #   stress.zsh <engine wine> <my wine> <tests dir> <work dir> <rounds> <report>
 #   stress.zsh --budget <rounds>
@@ -34,7 +33,7 @@
 # crash"); hung (killed at its time limit, exit 137); failed otherwise. <report> gets a Markdown
 # table of them, a line for each run that didn't pass, and each run's time, written again after
 # every run: a job that stops this script at its own time limit still has the table so far. The
-# logs are <work dir>/<engine, mine, off or lock>/<label>.log, the samples of a hang beside them. Exits 0
+# logs are <work dir>/<engine, mine or off>/<label>.log, the samples of a hang beside them. Exits 0
 # unless its arguments are wrong: a crash here is a finding, not a failure.
 emulate -L zsh
 setopt err_exit pipe_fail no_unset extended_glob
@@ -53,13 +52,12 @@ integer rounds=$rounds_arg
 # The first run in a FEX's prefix makes the prefix, which took about 20 s more.
 typeset -A per_run=(smoke 5 counters 60) limit=(smoke 40 counters 120)
 integer prefix_secs=20
-typeset -A names=(engine "the engine's" mine mine off "mine, FEX_ENTRYHEADERLOOKUP=0 FEX_DISPATCHERL1LOOKUP=0"
-  lock "mine, FEX_ENTRYCOMPILELOCK=1 FEX_ENTRYHEADERLOOKUP=1 FEX_DISPATCHERL1LOOKUP=1")
+typeset -A names=(engine "the engine's" mine mine off "mine, FEX_ENTRYHEADERLOOKUP=0 FEX_DISPATCHERL1LOOKUP=0")
 
 typeset -a combos notes
 for program in smoke counters; do
   for l1 in 0 unset; do
-    for which in mine off lock engine; do
+    for which in mine off engine; do
       combos+=($program:$which:$l1)
     done
   done
@@ -75,7 +73,7 @@ if [[ $1 == --budget ]]; then
   exit 0
 fi
 
-typeset -A wines=(engine ${1:A} mine ${2:A} off ${2:A} lock ${2:A})
+typeset -A wines=(engine ${1:A} mine ${2:A} off ${2:A})
 tests=${3:A} work=${4:A} out_file=${6:A}
 integer start=$SECONDS t rc
 here=${0:A:h}
@@ -102,7 +100,7 @@ report() {
     done
     print
     if (( ${#notes} )); then
-      print "Runs that didn't pass (logs and samples in the stress artifact, under engine/, mine/, off/ and lock/):\n"
+      print "Runs that didn't pass (logs and samples in the stress artifact, under engine/, mine/ and off/):\n"
       print -rl -- $notes
     else
       print "No run failed."
@@ -134,7 +132,6 @@ for (( round = 1; round <= rounds; round++ )); do
     vars=()
     [[ $l1 == unset ]] || vars=(FEX_DYNAMICL1CACHE=$l1)
     [[ $which != off ]] || vars+=(FEX_ENTRYHEADERLOOKUP=0 FEX_DISPATCHERL1LOOKUP=0)
-    [[ $which != lock ]] || vars+=(FEX_ENTRYCOMPILELOCK=1 FEX_ENTRYHEADERLOOKUP=1 FEX_DISPATCHERL1LOOKUP=1)
     mkdir -p "$work/$which"
     rc=0 t=$SECONDS
     if [[ $program == counters && $which != engine ]]; then
