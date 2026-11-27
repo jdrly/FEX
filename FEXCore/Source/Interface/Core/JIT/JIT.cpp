@@ -880,7 +880,6 @@ CPUBackend::CompiledCode Arm64JITCore::EmitJITCode(uint64_t Entry, uint64_t Size
   this->Entry = Entry;
   this->DebugData = DebugData;
   this->IR = IR;
-  BlockChecksTF = CheckTF;
   RequiresFarARM64Jumps = false;
   SSANodeMultiplier = 24;
 

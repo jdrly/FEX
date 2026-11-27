@@ -94,15 +94,6 @@ void OpDispatchBuilder::LEAOp(OpcodeArgs) {
     DstSize = OpAddr == X86Tables::DecodeFlags::FLAG_OPERAND_SIZE_LAST ? OpSize::i16Bit : OpSize::i32Bit;
   }
 
-  if (CTX->Config.Lea32BitAdds() && Is64BitMode && DstSize == OpSize::i32Bit && !Op->Src[0].IsGPR()) {
-    // A 32-bit destination only keeps the low half of the address, which 32-bit adds get right, and their result is
-    // already zero-extended: `add w2, w8, #1` instead of a 64-bit add and a 32-bit move.
-    AddressMode A = DecodeAddress(Op, Op->Src[0], MemoryAccessType::DEFAULT, true /* IsLoad */);
-    A.Segment = nullptr;
-    StoreResultGPR_WithOpSize(Op, Op->Dest, LoadEffectiveAddress(this, A, OpSize::i32Bit, false), DstSize);
-    return;
-  }
-
   auto Src = LoadSourceGPR_WithOpSize(Op, Op->Src[0], SrcSize, Op->Flags, {.LoadData = false, .AllowUpperGarbage = SrcSize > DstSize});
   StoreResultGPR_WithOpSize(Op, Op->Dest, Src, DstSize);
 }
@@ -1143,13 +1134,6 @@ void OpDispatchBuilder::MOVSXDOp(OpcodeArgs) {
   auto Size = std::min<IR::OpSize>(OpSize::i32Bit, OpSizeFromSrc(Op));
   bool Sext = (Size != OpSize::i16Bit) && Op->Flags & FEXCore::X86Tables::DecodeFlags::FLAG_REX_WIDENING;
 
-  if (Sext) {
-    if (Ref Loaded = LoadMemSExtIfPossible(Op, Op->Src[0], OpSize::i64Bit, Size)) {
-      StoreResultGPR(Op, Loaded);
-      return;
-    }
-  }
-
   Ref Src = LoadSourceGPR_WithOpSize(Op, Op->Src[0], Size, Op->Flags, {.AllowUpperGarbage = Sext});
   if (Size == OpSize::i16Bit) {
     // This'll make sure to insert in to the lower 16bits without modifying upper bits
@@ -1165,22 +1149,14 @@ void OpDispatchBuilder::MOVSXDOp(OpcodeArgs) {
 }
 
 void OpDispatchBuilder::MOVSXOp(OpcodeArgs) {
-  const auto Size = OpSizeFromSrc(Op);
-  const auto DstSize = OpSizeFromDst(Op);
-  const auto ExtSize = DstSize == OpSize::i64Bit ? OpSize::i64Bit : OpSize::i32Bit;
-
-  // A memory source is loaded and sign-extended by one ldrsb/ldrsh.
-  if (Ref Loaded = LoadMemSExtIfPossible(Op, Op->Src[0], ExtSize, Size)) {
-    StoreResultGPR(Op, Op->Dest, Loaded);
-    return;
-  }
-
   // Load garbage in upper bits, since we're sign extending anyway
+  const auto Size = OpSizeFromSrc(Op);
   Ref Src = LoadSourceGPR(Op, Op->Src[0], Op->Flags, {.AllowUpperGarbage = true});
 
   // Sign-extend to DstSize and zero-extend to the register size, using a fast
   // path for 32-bit dests where the native 32-bit Sbfe zero extends the top.
-  Src = _Sbfe(ExtSize, IR::OpSizeAsBits(Size), 0, Src);
+  const auto DstSize = OpSizeFromDst(Op);
+  Src = _Sbfe(DstSize == OpSize::i64Bit ? OpSize::i64Bit : OpSize::i32Bit, IR::OpSizeAsBits(Size), 0, Src);
   StoreResultGPR(Op, Op->Dest, Src);
 }
 

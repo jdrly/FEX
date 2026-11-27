@@ -47,12 +47,12 @@ How to read the columns:
 | `block-lookups` | 3 | The dispatcher looks in L1 before it leaves for C++ (#7), a block entry stores no header (#8), and both are the fork's defaults (#22) | `FEX_DISPATCHERL1LOOKUP` (on), `FEX_ENTRYHEADERLOOKUP` (on) | shipped, on. `FEX_ENTRYHEADERLOOKUP=0` set while the sampler can run | Release: `FEX_ENTRYHEADERLOOKUP=0` for the sampler. Gone list: both, with `0` as the off value | About 1 fps at equal draws in every busy band on dev.16 (ADR 0008) | **keep.** The fork's defaults, and the only FEX change with a number from play |
 | `code-buffer` | 1 | The first code buffer can start at 128 MB (#4) | `FEX_INITIALCODEBUFFERMB` (16, upstream's) | shipped, unset | Dev list: `=128` | With 128, `code_buffer_moves 0` on every thread of the long dev.23 session (the triage). No session without it since | **decide.** Never a default. The open case is one line: is the count 0 at 16 too |
 | `tso-syscalls` | 1 | On ARM64EC with hardware TSO switched per thread, a thread stays on hardware TSO across a guest system call. Unix calls still switch it off (#5) | `FEX_HARDWARETSOSYSCALLS` (`switch`, upstream's) | shipped, unset | Dev list: `=keep` | No measurement | **decide.** Never a default |
-| `entry-compile-lock` | 2 | One compile per guest entry when threads miss on it together (#10), and where its lock sits after athei's split of `CompileBlock`. On Windows ARM64 FEX's pool allocators also read the CPU's counter for their clock in place of `QueryPerformanceCounter` | `FEX_ENTRYCOMPILELOCK` (off) | shipped, unset | Dev list: `=1` | No measurement. The game thread compiles 12.8 blocks a second in the long dev.23 session (the triage), which is little | **decide.** Never a default |
-| `codegen-cuts` | 1 | Shorter code for a 32-bit `lea` and for sign-extending loads that need no TSO emulation (#11). Its title says three cuts, and `Config.json.in` has these two options for it | `FEX_LEA32BITADDS` (off), `FEX_SIGNEXTENDINGLOADS` (off) | shipped, unset | Dev list: both `=1` | No measurement. It carries 110 instruction-count listings, which every base move regenerates | **decide.** Never a default |
+| `entry-compile-lock` | 2 | One compile per guest entry when threads miss on it together (#10), and where its lock sits after athei's split of `CompileBlock`. On Windows ARM64 FEX's pool allocators also read the CPU's counter for their clock in place of `QueryPerformanceCounter` | `FEX_ENTRYCOMPILELOCK` (off), gone since the drop | shipped, unset | Dev list: `=1`, gone list since jdrly/gw2-on-mac#373 | No measurement. The game thread compiles 12.8 blocks a second in the long dev.23 session (the triage), which is little | **dropped 2026-11-27** (ADR 0013). Last in `gw2-on-mac` at `3863eae77` |
+| `codegen-cuts` | 1 | Shorter code for a 32-bit `lea` and for sign-extending loads that need no TSO emulation (#11). Its title says three cuts, and `Config.json.in` had these two options for it | `FEX_LEA32BITADDS` (off), `FEX_SIGNEXTENDINGLOADS` (off), both gone since the drop | shipped, unset | Dev list: both `=1`, gone list since jdrly/gw2-on-mac#373 | No measurement. It added two instruction-count listings, gone with it, and its `FormatVersion` step touched the other 108 | **dropped 2026-11-27** (ADR 0013). Last in `gw2-on-mac` at `3863eae77` |
 | `avx-hide` | 1 | `FEX_HOSTFEATURES=disableavx` hides AVX from the game (#12) | FEX's own variable, with a value only my FEX honours (unset) | shipped, unset | Dev list: `=disableavx`, with the app's code to join several values | No frame number. Upstream's `834c976` renames the field its lines test (the triage) | **decide.** Never a default, and it is the FEX topic the next base is known to break |
-| `singlestep-fix` | 1 | While TF is set, indirect branches go through the dispatcher, so a single step isn't lost (#13) | `FEX_TRAPFLAGINDIRECTBRANCHES` (off) | shipped, unset | no | Found by a test. Nobody has seen it in play, and it acts only while TF is set, by a debugger's single step or by guest code | **decide.** Off in every build, the dev builds too |
+| `singlestep-fix` | 1 | While TF is set, indirect branches go through the dispatcher, so a single step isn't lost (#13) | `FEX_TRAPFLAGINDIRECTBRANCHES` (off), gone since the drop | shipped, unset | no | Found by a test. Nobody has seen it in play, and it acts only while TF is set, by a debugger's single step or by guest code | **dropped 2026-11-27** (ADR 0013). Last in `gw2-on-mac` at `3863eae77` |
 | `suspend-fix` | 1 | A thread spinning in a loop closed by a conditional backward branch can be suspended (#14). The JIT emits the check on Windows only | `FEX_CONDBACKEDGESUSPEND` (off), gone since the drop | shipped, unset | An ADR only | Two instructions more per taken conditional back-edge, for a problem nobody has seen in play. I asked why we were adding something that costs frames, and kept it out of dev builds (the app's ADR 0009, 2026-11-15) | **dropped 2026-11-26** (ADR 0012). Last in `gw2-on-mac` at `537a2281c` |
-| `return-lookup` | 1 | A predicted guest return falls through to its `ret`, and the L1 lookup for a missed one moves after the unit's code (#25, from Squark's patch `0045`). A block that checks TF with `FEX_TRAPFLAGINDIRECTBRANCHES=1` keeps its path through the dispatcher | `FEX_RETURNLOOKUPOUTOFLINE` (off) | not in 0.2.1 | None yet. jdrly/gw2-on-mac#350 adds its dev list row | 48 bytes a return site off, 16 on plus 36 after the unit (ADR 0010). Squark's author measured 3.19 to 2.58 ns a call with 4,096 small functions. No number from GW2: jdrly/gw2-on-mac#343 waits for my on and off sessions | **decide.** Never a default. The open case is #343's sessions |
+| `return-lookup` | 1 | A predicted guest return falls through to its `ret`, and the L1 lookup for a missed one moves after the unit's code (#25, from Squark's patch `0045`) | `FEX_RETURNLOOKUPOUTOFLINE` (off) | not in 0.2.1 | None yet. jdrly/gw2-on-mac#350 adds its dev list row | 48 bytes a return site off, 16 on plus 36 after the unit (ADR 0010). Squark's author measured 3.19 to 2.58 ns a call with 4,096 small functions. No number from GW2: jdrly/gw2-on-mac#343 waits for my on and off sessions | **decide.** Never a default. The open case is #343's sessions |
 | `kept-0.3.1-history` | 31 | athei's 10 commits of the 0.3.1 base and my 21 on them, reachable under the merges | n/a | n/a | n/a | n/a | **keep as history.** Not replayed. Its content is in the 30 |
 | `engine-move-merges` | 2 | `4af914c59`, with `597e7ccbedd`'s tree, and `35f3f2d0c` (#21), with `8a969bc74`'s | n/a | n/a | n/a | n/a | **keep as history.** No tree effect |
 
@@ -65,19 +65,33 @@ Numbers like #25 are this fork's pull requests. The triage is my workspace's
 
 - **Does `fex` default to mine in a release?** Until it does, the whole series is carried for dev
   builds and for `set fex mine`. `block-lookups` is the one topic with a result from play.
-- **Open:** `code-buffer`, `tso-syscalls`, `entry-compile-lock`, `codegen-cuts`, `avx-hide`,
-  `singlestep-fix` and `return-lookup`. None has a number from play.
+- **Open:** `code-buffer`, `tso-syscalls`, `avx-hide` and `return-lookup`. None has a number from
+  play.
 
 ### Dropped
 
 | Topic | Dropped | Last in `gw2-on-mac` at | Record |
 |---|---|---|---|
 | `suspend-fix` | 2026-11-26 | `537a2281c` (#27) | ADR 0012, jdrly/gw2-on-mac#361. No list of the app wrote `FEX_CONDBACKEDGESUSPEND`, and the app's ADR 0009 records why I kept it out of dev builds |
+| `entry-compile-lock` | 2026-11-27 | `3863eae77` (#28) | ADR 0013, jdrly/gw2-on-mac#375. The lock can't shorten a wait, and the code buffer is less than half full with or without it. The app's `DEV_GONE` row is #373's |
+| `codegen-cuts` | 2026-11-27 | `3863eae77` (#28) | ADR 0013, jdrly/gw2-on-mac#375. It touches 0.82% of GW2's instructions, and Squark's author measured no change in time. The app's `DEV_GONE` rows are #373's |
+| `singlestep-fix` | 2026-11-27 | `3863eae77` (#28) | ADR 0013, jdrly/gw2-on-mac#375. Off in every build, and I found no `popf` in GW2 that sets TF. A handler that sets it in a `CONTEXT` isn't ruled out |
 
 A drop is a commit on `gw2-on-mac` that takes the topic's code out. The topic keeps its lines in
 the machine blocks, and before the series is next built the drop commit gets one too, under the
 topic. The topic's series commit then holds what the drop left: for `suspend-fix`, the include
 of `Interface/Core/JIT/DebugData.h` in `BranchOps.cpp`, which `return-lookup` uses.
+
+The drop of 2026-11-27 is one commit for three topics, and `series-topics` gives a commit one. Its
+paths outside the rules are `entry-compile-lock`'s (`Core.cpp`, `ThreadPoolAllocator.h`),
+`codegen-cuts`' (`MemoryOps.cpp`, `OpcodeDispatcher.cpp`, `OpcodeDispatcher.h`, `IR.json`,
+`unittests/ASM`) and `singlestep-fix`'s (`BranchOps.cpp`, `JIT.cpp`, `JITClass.h`). Its
+`BranchOps.cpp` hunk also changes the line of `return-lookup` that tested `ViaDispatcher`, so its
+slice applies only after `return-lookup`'s commit. Whichever of the three its line names, the
+other two keep their code in their own series commits and lose it in that one. The three leave
+nothing behind once dropped. On 2026-11-27 I built the series with a stand-in for the squash
+commit, once under `singlestep-fix` and once under `entry-compile-lock`, with `3863eae77` under
+`suspend-fix`: both gave 16 commits for 15 topics and the head's tree. Either line works.
 
 ### What a drop costs
 

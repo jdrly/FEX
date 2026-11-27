@@ -1,6 +1,7 @@
 # A predicted return falls through to its ret, behind a switch
 
-Decided 2026-11-26. Status: accepted, off by default until it wins in play (ADR 0002, 0008).
+Decided 2026-11-26, amended 2026-11-27 (ADR 0013). Status: accepted, off by default until it wins
+in play (ADR 0002, 0008).
 
 A guest return pops the pair its call pushed on the call-return stack, the guest return address
 and the host PC, and compares the address with the one it returns to. On a match it ends in
@@ -28,9 +29,9 @@ GW2's game thread is for play to say (jdrly/gw2-on-mac #343).
   The core job checks the default from CodeSizeValidation's `ret` block on the same build: unset has
   to give the same return site as `=0`, and `=1` a site eight instructions shorter. Its "Return
   site" and "Return rest" lines are the dump of both shapes.
-- A block that checks TF with `FEX_TRAPFLAGINDIRECTBRANCHES=1` keeps its path through the
-  dispatcher (#168): the switch doesn't touch it. A block that checks TF without that switch takes
-  the new shape like any other block, as it took the inline lookup before.
+- A block that checks TF takes the new shape like any other block, as it took the inline lookup
+  before. Until 2026-11-27 one with `FEX_TRAPFLAGINDIRECTBRANCHES=1` kept its path through the
+  dispatcher (#168), and the switch didn't touch it. ADR 0013 dropped that switch.
 - The option affects code generation, so the disk cache keeps blocks of each value apart, and
   `FormatVersion` goes from 57 to 58 in the branch's last commit, as for #164, #168 and #169.
 - No CPUState field moves, so `GW2Contract.h` and my Wine sampler stay as they are. The moved
@@ -40,8 +41,9 @@ GW2's game thread is for play to say (jdrly/gw2-on-mac #343).
   before. It reads only FEX's own state and L1, so it can't fault.
 - Tests: `tests/gw2/retlookup.c` returns with the prediction holding, to swapped and pushed
   addresses (through the dispatcher and through L1), and under single steps, with the switch off
-  and on and with #168's switch. The dev rerun set has the switch on. The core job's `asm-cuts`
-  pass, which runs FEX's assembly tests with the dev build's code generation switches, has it too.
+  and on. The dev rerun set has the switch on. The core job's `asm-cuts` pass, which runs FEX's
+  assembly tests with the dev build's code generation switches, has it too, and since ADR 0013 it
+  is the only one there.
 - Dev builds turn it on for `Gw2-64.exe` (`dev-switches.conf` in the app).
 
 ## Alternatives I rejected

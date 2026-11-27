@@ -20,7 +20,6 @@
 #include <FEXCore/fextl/unordered_map.h>
 #include <FEXCore/fextl/vector.h>
 
-#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -384,10 +383,6 @@ public:
     FEX_CONFIG_OPT(StrictInProcessSplitLocks, STRICTINPROCESSSPLITLOCKS);
     FEX_CONFIG_OPT(MonoHacks, MONOHACKS);
     FEX_CONFIG_OPT(JITFeatures, JITFEATURES);
-    FEX_CONFIG_OPT(EntryCompileLock, ENTRYCOMPILELOCK);
-    FEX_CONFIG_OPT(Lea32BitAdds, LEA32BITADDS);
-    FEX_CONFIG_OPT(SignExtendingLoads, SIGNEXTENDINGLOADS);
-    FEX_CONFIG_OPT(TrapFlagIndirectBranches, TRAPFLAGINDIRECTBRANCHES);
     FEX_CONFIG_OPT(ReturnLookupOutOfLine, RETURNLOOKUPOUTOFLINE);
   } Config;
 
@@ -397,9 +392,6 @@ public:
   bool HostRNGAvailable {};
 
   FEXCore::Utils::WritePriorityMutex::Mutex CodeInvalidationMutex {};
-  // GW2 on Mac (jdrly/gw2-on-mac#165): with EntryCompileLock, taken while compiling a guest entry, by a hash of its RIP. See
-  // CompileBlock.
-  std::array<FEXCore::Utils::WritePriorityMutex::Mutex, 1024> EntryCompileLocks {};
 
   uint32_t StrictSplitLockMutex {};
 

@@ -57,9 +57,10 @@
 #   instructions shorter with it at 1 than at 0, and unset the same as at 1. A return's exit, as
 #   CodeSizeValidation prints a ret block, has to be eight instructions shorter at its site with
 #   FEX_RETURNLOOKUPOUTOFLINE at 1 than at 0, and unset the same code as at 0 (jdrly/gw2-on-mac#343).
-#   The assembly tests run once more with #164's two switches and #343's on (FEX_LEA32BITADDS,
-#   FEX_SIGNEXTENDINGLOADS, FEX_RETURNLOOKUPOUTOFLINE), as a dev build of my app runs them.
-#   The pass with FEX_DISPATCHERL1LOOKUP=0 and the one with #164's and #343's switches run on a push and on a
+#   The assembly tests run once more with #343's switch on (FEX_RETURNLOOKUPOUTOFLINE), as a dev
+#   build of my app runs it. That pass is asm-cuts, named for #164's two switches, which it ran too
+#   until I dropped them on 2026-11-27 (docs/gw2/adr/0013).
+#   The pass with FEX_DISPATCHERL1LOOKUP=0 and asm-cuts run on a push and on a
 #   pull request that changes FEXCore/Source/Interface/Core or this workflow (jdrly/gw2-on-mac#326).
 #   The failures are compared with tests/gw2/core-failures.txt, the
 #   engine's commit's, whose lines count for the runs with the options too: a test that isn't on
@@ -83,13 +84,13 @@
 #   (jdrly/gw2-on-mac#132). It builds nothing of FEX: it takes the build of my FEX that a push
 #   published (fex-arm64-<commit>.tar.xz on arm64-builds) or, failing that, the artifact a pull
 #   request's run left (kept 7 days). tests/gw2/stress.zsh starts counters.exe and Mach9's smoke
-#   program under the engine's FEX, under mine (both lookups on, the default), under mine with
-#   both lookups at 0 and under mine with FEX_ENTRYCOMPILELOCK=1, with FEX_DYNAMICL1CACHE unset and at 0,
+#   program under the engine's FEX, under mine (both lookups on, the default) and under mine with
+#   both lookups at 0, with FEX_DYNAMICL1CACHE unset and at 0,
 #   for <rounds> rounds (5 unless the run says otherwise). Its time limits come from
 #   stress.zsh --budget <rounds>: the seconds after which no run starts are
 #   <rounds> times a round's planned time plus the prefixes, the step gets one longest run and a
-#   minute more, the job 5 minutes more than the step. With 16 combinations and 5 rounds that is
-#   no run after 2680 s, the step at 48 minutes and the job at 53. The summary has the table of
+#   minute more, the job 5 minutes more than the step. With 12 combinations and 5 rounds that is
+#   no run after 2010 s, the step at 37 minutes and the job at 42. The summary has the table of
 #   passes, crashes and hangs and which combinations got fewer runs; the artifact stress-<run id>
 #   the logs and samples. The job budget, on Linux, works out the limits and stops the run at once
 #   when another run of this workflow is queued or running: a manual run takes no slot from a
@@ -738,9 +739,9 @@ jobs:
               cat "$out/asm-l1lookup-off.diff"
               status=1
             fi
-            # #164's two switches and #343's with the lookups, as a dev build of my app runs them
-            suite asm-cuts '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_LEA32BITADDS=1 FEX_SIGNEXTENDINGLOADS=1 \
-              FEX_RETURNLOOKUPOUTOFLINE=1
+            # #343's switch with the lookups, as a dev build of my app runs it. The name is from
+            # #164's two switches, dropped on 2026-11-27 (docs/gw2/adr/0013).
+            suite asm-cuts '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_RETURNLOOKUPOUTOFLINE=1
           else
             echo "asm-l1lookup-off, asm-cuts: not run, this pull request changes neither FEXCore/Source/Interface/Core nor the workflow" |
               tee -a "$out/totals"
@@ -808,9 +809,9 @@ jobs:
             echo "::error::no reference list $ref yet"
             exit 1
           fi
-          # the suites run again with FEX_ENTRYHEADERLOOKUP=0, and with #164's and #343's switches when that
-          # pass ran, have the same reference as the default runs
-          cuts=", its asm lines also for the run with #164's and #343's switches"
+          # the suites run again with FEX_ENTRYHEADERLOOKUP=0, and with #343's switch when that pass
+          # ran, have the same reference as the default runs
+          cuts=", its asm lines also for the run with #343's switch"
           [[ $PASSES != 0 ]] || cuts=""
           LC_ALL=C sort "$ref" <(sed -n 's/^asm /asm-lookup-off /p; s/^instcountci /instcountci-lookup-off /p' "$ref") \
             <(if [[ -n $cuts ]]; then sed -n 's/^asm /asm-cuts /p' "$ref"; fi) >"$out/reference"

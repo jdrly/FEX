@@ -16,9 +16,11 @@
  *
  * jdrly/gw2-on-mac#168: a step outside step_run is a stray one. Each round's line says whether the
  * round trapped at step_after, where the handler clears TF, and one line a round lists the stray
- * steps' Rips, main's as main+<offset>. FEX_TRAPFLAGINDIRECTBRANCHES=1 has to trap at step_after
- * in every round and step nowhere else; the program then also prints "gw2 test singlestep: every
- * round trapped at step_after, no stray steps". */
+ * steps' Rips, main's as main+<offset>. When every round trapped at step_after and nothing else
+ * stepped, the program also prints "gw2 test singlestep: every round trapped at step_after, no
+ * stray steps". In run 43444435324 neither FEX printed it: step_target's return found step_after
+ * in L1, in a block compiled without TF checks. My switch for that is gone since 2026-11-27
+ * (docs/gw2/adr/0013), so no case requires the line, and a log that has it shows the bug fixed. */
 #include <stdint.h>
 #include <stdio.h>
 #include <windows.h>
