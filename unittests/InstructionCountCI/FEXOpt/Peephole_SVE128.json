@@ -10,7 +10,7 @@
       "FLAGM2",
       "SVE256"
     ],
-    "BinaryCacheVersion": 60
+    "BinaryCacheVersion": 61
   },
   "Comment": [
     "This file tracks the translations for the 'peephole' optimizations in FEX.",

@@ -14,7 +14,7 @@
       "I8MM",
       "DOTPROD"
     ],
-    "BinaryCacheVersion": 60
+    "BinaryCacheVersion": 61
   },
   "Instructions": {
     "vpshufb xmm0, xmm1, xmm2": {

@@ -53,6 +53,7 @@ How to read the columns:
 | `singlestep-fix` | 1 | While TF is set, indirect branches go through the dispatcher, so a single step isn't lost (#13) | `FEX_TRAPFLAGINDIRECTBRANCHES` (off), gone since the drop | shipped, unset | no | Found by a test. Nobody has seen it in play, and it acts only while TF is set, by a debugger's single step or by guest code | **dropped 2026-11-27** (ADR 0013). Last in `gw2-on-mac` at `3863eae77` |
 | `suspend-fix` | 1 | A thread spinning in a loop closed by a conditional backward branch can be suspended (#14). The JIT emits the check on Windows only | `FEX_CONDBACKEDGESUSPEND` (off), gone since the drop | shipped, unset | An ADR only | Two instructions more per taken conditional back-edge, for a problem nobody has seen in play. I asked why we were adding something that costs frames, and kept it out of dev builds (the app's ADR 0009, 2026-11-15) | **dropped 2026-11-26** (ADR 0012). Last in `gw2-on-mac` at `537a2281c` |
 | `return-lookup` | 1 | A predicted guest return falls through to its `ret`, and the L1 lookup for a missed one moves after the unit's code (#25, from Squark's patch `0045`) | `FEX_RETURNLOOKUPOUTOFLINE` (off) | not in 0.2.1 | None yet. jdrly/gw2-on-mac#350 adds its dev list row | 48 bytes a return site off, 16 on plus 36 after the unit (ADR 0010). Squark's author measured 3.19 to 2.58 ns a call with 4,096 small functions. No number from GW2: jdrly/gw2-on-mac#343 waits for my on and off sessions | **decide.** Never a default. The open case is #343's sessions |
+| `upstream-shufps` | 1 | FEX-Emu's `604f018` and its test `b5a4954`, picked as they are with their authors (jdrly/gw2-on-mac#381): a `SHUFPS` with the same register as both sources takes `PSHUFD`'s one-source path. It came after the head this table was written against | none. It is upstream's code in upstream's file, without the switch ADR 0002 asks for, as #381 decided: every shuffle gives the same result on my Mac, and a switch of mine would conflict when the base brings the commit. On a host with SVE256, which my Mac doesn't have, `vshufps xmm, xmm, xmm, 0xe4` now keeps the source's upper lane, where the old code cleared it (review of #381) | not in 0.2.1 | no | `Gw2-64.exe` has 9,789 `shufps` with one register twice. 7,255 have an immediate other than 0 and take the new path. 4,977 of those are broadcasts, three instructions before and one after, and 0xc9's 1,214 go from a two-table lookup to a one-table one (the triage of 2026-11-27). No number from play | **keep until the base has it.** A replay onto a base that has both `604f018` and `b5a4954` reports it empty, and the topic goes |
 | `kept-0.3.1-history` | 31 | athei's 10 commits of the 0.3.1 base and my 21 on them, reachable under the merges | n/a | n/a | n/a | n/a | **keep as history.** Not replayed. Its content is in the 30 |
 | `engine-move-merges` | 2 | `4af914c59`, with `597e7ccbedd`'s tree, and `35f3f2d0c` (#21), with `8a969bc74`'s | n/a | n/a | n/a | n/a | **keep as history.** No tree effect |
 
@@ -217,6 +218,8 @@ d119be7878c0b186e5ffc18169e9b32fdb159945 engine-pins
 dffbd2aa56cb48637b003935761382db8eb17821 ci
 a4aa2cd5a595033b47796dd65351fc1b3ff899da return-lookup
 3e0bd23b8c01ee2783c282931363b2f2d12cc093 counters
+3863eae771282ae33add637166d4ee9a81a1ed5f suspend-fix
+9085ab554ece21175466940e7e9c199469ab9b7d singlestep-fix
 ```
 
 ```series-rules
@@ -238,6 +241,7 @@ options
 counters
 docs
 tests
+upstream-shufps
 code-buffer
 tso-syscalls
 block-lookups
@@ -270,6 +274,7 @@ avx-hide AVX: A rule can hide it from the game with FEX_HOSTFEATURES=disableavx
 singlestep-fix Single-step: Indirect branches go through the dispatcher while TF is set, behind a switch
 suspend-fix Suspend: A thread spinning in a loop closed by a conditional backward branch can be suspended, behind a switch
 return-lookup Returns: A predicted return falls through to its ret, and the L1 lookup moves after the unit, behind a switch
+upstream-shufps SHUFPS: Upstream's one-source SHUFPS takes PSHUFD's path (FEX-Emu 604f018 and b5a4954)
 engine-pins Engine pins: The check against Mach9 0.4.0's engine, my disk cache version and the regenerated listings
 ```
 
