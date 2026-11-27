@@ -548,8 +548,10 @@ jobs:
           for c in "$SRC"/tests/gw2/*.c; do
             "$MINGW_DIR/bin/x86_64-w64-mingw32-clang" -O2 -Wall -Werror -o "$t/$(basename "$c" .c).exe" "$c"
           done
-          # native ARM64EC DLLs that a program loads, such as fpcr.dll for fpcr.exe (jdrly/gw2-on-mac#392)
+          # native ARM64EC DLLs that a program loads, such as fpcr.dll for fpcr.exe (jdrly/gw2-on-mac#392).
+          # A pull request's head may predate the directory, so an unmatched glob builds nothing.
           for c in "$SRC"/tests/gw2/arm64ec/*.c; do
+            [[ -f $c ]] || continue
             "$MINGW_DIR/bin/arm64ec-w64-mingw32-clang" -O2 -Wall -Werror -shared -o "$t/$(basename "$c" .c).dll" "$c"
           done
           # FEX's arm64 path in SHMStats.h; CMake sets ARCHITECTURE_arm64 for FEX's own builds
