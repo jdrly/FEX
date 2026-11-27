@@ -422,11 +422,22 @@ check foldbranch both 60 foldbranch.exe "$foldbranch"
 check foldbranch-on mine 60 foldbranch.exe "$foldbranch" $foldout
 check foldbranch-on-extendeddebuginfo mine 60 foldbranch.exe "$foldbranch" $foldout FEX_EXTENDEDDEBUGINFO=1
 
+# jdrly/gw2-on-mac#389: FEX_SKIPRETURNSITESUSPENDCHECK, under which the block a call returns to
+# doesn't poll the suspend doorbell. callloop.exe (tests/gw2/callloop.c) suspends a thread 1,000
+# times in a loop that makes a direct call and in one that makes an indirect call, each closed by a
+# je back. Off, under both FEXes, the suspends land at the leaf's entry and after the call. On,
+# every one lands at the leaf's entry, the only poll left in an iteration.
+callloop='gw2 test callloop: passed'
+skipret=FEX_SKIPRETURNSITESUSPENDCHECK=1
+check callloop both 60 callloop.exe "$callloop" GW2_CALLLOOP_EXPECT=both
+check callloop-on mine 60 callloop.exe "$callloop" GW2_CALLLOOP_EXPECT=leaf $skipret
+
 # The two rerun sets (jdrly/gw2-on-mac#325), under mine only. Every program whose cases ran again
 # under a set of my switches runs once under each:
 #   dev          each of my on-or-off switches on: both lookups (#161, #162), the return
 #                lookup's (#343), the guest address literals' (#391), the exit's FPCR check
-#                at afp (#392) and the branch fold's (#395). The values of the others that dev-switches.conf sets (128 MB, keep, a fixed L1,
+#                at afp (#392), the branch fold's (#395) and the return site's suspend check (#389).
+#                The values of the others that dev-switches.conf sets (128 MB, keep, a fixed L1,
 #                disableavx) have cases of their own above.
 #   engine-like  both lookups at 0, as the engine's FEX finds blocks. A release build of my app
 #                runs the engine's FEX, so this is the path players run.
@@ -435,7 +446,7 @@ check foldbranch-on-extendeddebuginfo mine 60 foldbranch.exe "$foldbranch" $fold
 # both. Each set runs Mach9's smoke test and entryfault once, one of them with
 # FEX_SMCCHECKS=full: FEX's default mode finds a write into code by the page's fault, full
 # checks each block, so each set has both.
-dev=(FEX_ENTRYHEADERLOOKUP=1 FEX_DISPATCHERL1LOOKUP=1 $retout $addrlit FEX_EXITFPCRCHECK=afp $foldout)
+dev=(FEX_ENTRYHEADERLOOKUP=1 FEX_DISPATCHERL1LOOKUP=1 $retout $addrlit FEX_EXITFPCRCHECK=afp $foldout $skipret)
 enginelike=($lookupsoff)
 check smoke-default-dev mine 40 fex.exe "$smoke" $dev
 check smoke-smcchecks-full-engine-like mine 160 fex.exe "$smoke" $enginelike FEX_SMCCHECKS=full
@@ -471,3 +482,5 @@ check ripaddr-dev mine 60 ripaddr.exe "$ripaddr" $dev
 check ripaddr-engine-like mine 60 ripaddr.exe "$ripaddr" $enginelike
 check foldbranch-dev mine 60 foldbranch.exe "$foldbranch" $dev
 check foldbranch-engine-like mine 60 foldbranch.exe "$foldbranch" $enginelike
+check callloop-dev mine 60 callloop.exe "$callloop" GW2_CALLLOOP_EXPECT=leaf $dev
+check callloop-engine-like mine 60 callloop.exe "$callloop" GW2_CALLLOOP_EXPECT=both $enginelike

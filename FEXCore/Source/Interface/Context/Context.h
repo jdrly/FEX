@@ -385,6 +385,7 @@ public:
     FEX_CONFIG_OPT(JITFeatures, JITFEATURES);
     FEX_CONFIG_OPT(ReturnLookupOutOfLine, RETURNLOOKUPOUTOFLINE);
     FEX_CONFIG_OPT(GuestAddressLiterals, GUESTADDRESSLITERALS);
+    FEX_CONFIG_OPT(SkipReturnSiteSuspendCheck, SKIPRETURNSITESUSPENDCHECK);
   } Config;
 
   bool SoftwareRNGEnabled() const {

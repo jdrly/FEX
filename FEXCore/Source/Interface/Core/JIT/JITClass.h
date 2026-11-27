@@ -728,9 +728,9 @@ private:
   void EmitDivllu(ARMEmitter::Register Quotient, ARMEmitter::Register Remainder, ARMEmitter::Register Upper, ARMEmitter::Register Lower,
                   ARMEmitter::Register Divisor);
 
-  void EmitSuspendInterruptCheck();
+  void EmitSuspendInterruptCheck(bool PollDoorbell = true);
 
-  void EmitEntryPoint(ARMEmitter::BackwardLabel& HeaderLabel, bool CheckTF);
+  void EmitEntryPoint(ARMEmitter::BackwardLabel& HeaderLabel, bool CheckTF, bool PollDoorbell);
 
   [[nodiscard]] CodeBuffer::CodeBufferAllocation AllocateCodeBufferInSharedCache(size_t Size);
 

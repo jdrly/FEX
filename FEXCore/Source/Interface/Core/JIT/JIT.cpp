@@ -789,7 +789,7 @@ void Arm64JITCore::EmitTFCheck() {
   (void)Bind(&l_TFUnset);
 }
 
-void Arm64JITCore::EmitSuspendInterruptCheck() {
+void Arm64JITCore::EmitSuspendInterruptCheck(bool PollDoorbell) {
   if (CTX->Config.NeedsPendingInterruptFaultCheck) {
     // Trigger a fault if there are any pending interrupts
     // Used only for gdbserver at the moment
@@ -804,6 +804,10 @@ void Arm64JITCore::EmitSuspendInterruptCheck() {
     }
   }
 
+  if (!PollDoorbell) {
+    return;
+  }
+
 #ifdef _WIN32
   static constexpr uint16_t SuspendMagic {0xCAFE};
 
@@ -815,7 +819,7 @@ void Arm64JITCore::EmitSuspendInterruptCheck() {
 #endif
 }
 
-void Arm64JITCore::EmitEntryPoint(ARMEmitter::BackwardLabel& HeaderLabel, bool CheckTF) {
+void Arm64JITCore::EmitEntryPoint(ARMEmitter::BackwardLabel& HeaderLabel, bool CheckTF, bool PollDoorbell) {
   // With EntryHeaderLookup the paths that read InlineJITBlockHeader find the block from the host PC instead
   // (CPUBackend::FindBlockHeader, ContextImpl::SyncCurrentBlock), so an entry stores nothing.
   if (!EntryHeaderLookup) {
@@ -840,7 +844,7 @@ void Arm64JITCore::EmitEntryPoint(ARMEmitter::BackwardLabel& HeaderLabel, bool C
     }
   }
 
-  EmitSuspendInterruptCheck();
+  EmitSuspendInterruptCheck(PollDoorbell);
 }
 
 
@@ -1005,6 +1009,10 @@ CPUBackend::CompiledCode Arm64JITCore::EmitJITCode(uint64_t Entry, uint64_t Size
       if (BlockIROp->EntryPoint) {
         uint64_t BlockStartRIP = Entry + BlockIROp->GuestEntryOffset;
 
+        // GW2 on Mac (jdrly/gw2-on-mac#389), as Squark's FEX 0035 and MetalSharp's 0011: a call emitted earlier in this
+        // unit returns here, and the callee's entry, or ExitFunctionEC for native code, polled the doorbell after it.
+        // An entry no call named yet keeps its poll.
+        const bool ReturnSite = CTX->Config.SkipReturnSiteSuspendCheck() && CallReturnTargets.contains(Node);
         const auto IsReturnTarget = CallReturnTargets.try_emplace(Node).first;
         if (PendingTargetLabel) {
           // If there is a fallthrough branch to this block, skip over the entrypoint code.
@@ -1019,7 +1027,7 @@ CPUBackend::CompiledCode Arm64JITCore::EmitJITCode(uint64_t Entry, uint64_t Size
         CodeData.EntryPoints.emplace(BlockStartRIP, GetCursorAddress<uint8_t*>());
         DebugData->GuestOpcodes.push_back({BlockIROp->GuestEntryOffset, GetCursorAddress<uint8_t*>() - CodeData.BlockBegin});
 
-        EmitEntryPoint(JITCodeHeaderLabel, CheckTF);
+        EmitEntryPoint(JITCodeHeaderLabel, CheckTF, !ReturnSite);
       }
 
       if (PendingCallReturnTargetLabel) {
