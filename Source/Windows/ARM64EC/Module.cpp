@@ -76,6 +76,8 @@ extern IMAGE_DOS_HEADER __ImageBase; // Provided by the linker
 
 extern void* ExitFunctionEC;
 extern void* ExitFunctionECCounted;
+extern void* ExitFunctionECSkipFPCR;
+extern void* ExitFunctionECCountedSkipFPCR;
 extern void* CheckCall;
 extern void* ExitFunctionSuspendPoint;
 extern void* ExitFunctionSuspendResumePoint;
@@ -999,6 +1001,11 @@ extern "C" void SyncThreadContext(CONTEXT* Context) {
   FEX::Windows::HardwareTSO::EnsureOn(Thread->CurrentFrame);
 }
 
+// The exits ThreadInit gives a thread without and with a stats slot. ExitFPCRCheck=afp without AFP takes the ones that
+// skip the FPCR read: without AFP the JIT never sets AH or NEP, so there is nothing to clear on the way out.
+static void* ExitFunction = &ExitFunctionEC;
+static void* ExitFunctionCounted = &ExitFunctionECCounted;
+
 NTSTATUS ProcessInit() {
   if (!InitSyscalls()) {
     return STATUS_NOT_SUPPORTED;
@@ -1040,6 +1047,14 @@ NTSTATUS ProcessInit() {
     auto HostFeatures =
       FEX::Windows::CPUFeatures::FetchHostFeatures(IsWine, FEXCore::HostFeatures::HostTypeEnum::Arm64ec, FEX::Windows::UnixLib::GetPID());
     HostFeatures.SupportsHardwareTSO = FEX::Windows::HardwareTSO::Init();
+
+    FEX_CONFIG_OPT(ExitFPCRCheck, EXITFPCRCHECK);
+    if (ExitFPCRCheck() == FEXCore::Config::CONFIG_EXITFPCRCHECK_AFP && !HostFeatures.SupportsAFP) {
+      ExitFunction = &ExitFunctionECSkipFPCR;
+      ExitFunctionCounted = &ExitFunctionECCountedSkipFPCR;
+      LogMan::Msg::IFmt("FEX: Exits to native code skip the FPCR check");
+    }
+
     CTX = FEXCore::Context::Context::CreateNewContext(HostFeatures);
   }
 
@@ -1645,7 +1660,7 @@ NTSTATUS ThreadInit() {
   Frame->State.cs_cached = FEXCore::Core::CPUState::CalculateGDTBase(GDT);
 
   FEX::Windows::CallRetStack::InitializeThread(Thread);
-  Thread->CurrentFrame->Pointers.ExitFunctionEC = reinterpret_cast<uintptr_t>(&ExitFunctionEC);
+  Thread->CurrentFrame->Pointers.ExitFunctionEC = reinterpret_cast<uintptr_t>(ExitFunction);
   Thread->CurrentFrame->Pointers.SynchronousExceptionHandler = reinterpret_cast<uintptr_t>(&Exception::SynchronousExceptionHandler);
   CPUArea.StateFrame() = Thread->CurrentFrame;
 
@@ -1678,8 +1693,8 @@ NTSTATUS ThreadInit() {
       // Module.S reads this copy, set before SuspendDoorbell below
       Thread->CurrentFrame->ThreadStats = Thread->ThreadStats;
       if (Thread->ThreadStats) {
-        // Counts this thread's exits into native code; other threads keep the plain ExitFunctionEC
-        Thread->CurrentFrame->Pointers.ExitFunctionEC = reinterpret_cast<uintptr_t>(&ExitFunctionECCounted);
+        // Counts this thread's exits into native code; other threads keep the plain exit
+        Thread->CurrentFrame->Pointers.ExitFunctionEC = reinterpret_cast<uintptr_t>(ExitFunctionCounted);
       }
     }
   }
@@ -1757,7 +1772,7 @@ NTSTATUS ThreadTerm(HANDLE Thread, LONG ExitCode) {
       // The slot can go to a new thread from here on, so nothing of this one may count in it any more
       Stopping->ThreadStats = nullptr;
       Stopping->CurrentFrame->ThreadStats = nullptr;
-      Stopping->CurrentFrame->Pointers.ExitFunctionEC = reinterpret_cast<uintptr_t>(&ExitFunctionEC);
+      Stopping->CurrentFrame->Pointers.ExitFunctionEC = reinterpret_cast<uintptr_t>(ExitFunction);
     }
 
     // Terminated in the middle of an untracked read or memory write, see BTCpu64NotifyReadFile

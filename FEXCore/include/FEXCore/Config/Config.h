@@ -37,6 +37,12 @@ namespace Handler {
     }
     return "0";
   }
+  static inline std::optional<fextl::string> ExitFPCRCheckHandler(std::string_view Value) {
+    if (Value == "afp") {
+      return "1";
+    }
+    return "0";
+  }
 } // namespace Handler
 
 enum ConfigOption {
@@ -57,6 +63,11 @@ enum ConfigSMCChecks {
 enum ConfigHardwareTSOSyscalls {
   CONFIG_HARDWARETSOSYSCALLS_SWITCH,
   CONFIG_HARDWARETSOSYSCALLS_KEEP,
+};
+
+enum ConfigExitFPCRCheck {
+  CONFIG_EXITFPCRCHECK_ALWAYS,
+  CONFIG_EXITFPCRCHECK_AFP,
 };
 
 enum class LayerType {
