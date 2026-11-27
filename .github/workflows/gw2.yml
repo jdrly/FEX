@@ -57,9 +57,12 @@
 #   instructions shorter with it at 1 than at 0, and unset the same as at 1. A return's exit, as
 #   CodeSizeValidation prints a ret block, has to be eight instructions shorter at its site with
 #   FEX_RETURNLOOKUPOUTOFLINE at 1 than at 0, and unset the same code as at 0 (jdrly/gw2-on-mac#343).
-#   The assembly tests run once more with #343's switch on (FEX_RETURNLOOKUPOUTOFLINE), as a dev
-#   build of my app runs it. That pass is asm-cuts, named for #164's two switches, which it ran too
-#   until I dropped them on 2026-11-27 (docs/gw2/adr/0013).
+#   Three instructions CodeSizeValidation compiles above 4 GB, a [rip + …] load, a call's push of its
+#   return address and add [rip + …], rax, have to be 2, 2 and 5 instructions shorter with
+#   FEX_GUESTADDRESSLITERALS at 1 than at 0, and unset the same code as at 0 (jdrly/gw2-on-mac#391).
+#   The assembly tests run once more with #343's and #391's switches on (FEX_RETURNLOOKUPOUTOFLINE,
+#   FEX_GUESTADDRESSLITERALS), as a dev build of my app runs them. That pass is asm-cuts, named for
+#   #164's two switches, which it ran too until I dropped them on 2026-11-27 (docs/gw2/adr/0013).
 #   The pass with FEX_DISPATCHERL1LOOKUP=0 and asm-cuts run on a push and on a
 #   pull request that changes FEXCore/Source/Interface/Core or this workflow (jdrly/gw2-on-mac#326).
 #   The failures are compared with tests/gw2/core-failures.txt, the
@@ -739,9 +742,9 @@ jobs:
               cat "$out/asm-l1lookup-off.diff"
               status=1
             fi
-            # #343's switch with the lookups, as a dev build of my app runs it. The name is from
-            # #164's two switches, dropped on 2026-11-27 (docs/gw2/adr/0013).
-            suite asm-cuts '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_RETURNLOOKUPOUTOFLINE=1
+            # #343's and #391's switches with the lookups, as a dev build of my app runs them. The name
+            # is from #164's two switches, dropped on 2026-11-27 (docs/gw2/adr/0013).
+            suite asm-cuts '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_RETURNLOOKUPOUTOFLINE=1 FEX_GUESTADDRESSLITERALS=1
           else
             echo "asm-l1lookup-off, asm-cuts: not run, this pull request changes neither FEXCore/Source/Interface/Core nor the workflow" |
               tee -a "$out/totals"
@@ -788,6 +791,36 @@ jobs:
           # the site only: the rest ends in the exit linker's address, which changes from run to run
           if ! grep '^Return site: ' "$out/return-0" >"$out/site-0" || ! grep '^Return site: ' "$out/return-unset" | cmp -s "$out/site-0" -; then
             echo "::error::FEX_RETURNLOOKUPOUTOFLINE unset has to emit the return as at 0"
+            status=1
+          fi
+          # three instructions above 4 GB, from CodeSizeValidation's probes, with FEX_GUESTADDRESSLITERALS off,
+          # on and unset, which has to be off and the same code (jdrly/gw2-on-mac#391). On, the address is one
+          # ldr of a literal in place of three moves, and add [rip + …], rax builds it once in place of twice.
+          # A listing that counts other numbers with the switch on exits 1; a signal (128 and up) fails the check.
+          for v in 0 1 unset; do
+            if [[ $v == unset ]]; then vars=(-u FEX_GUESTADDRESSLITERALS); else vars=("FEX_GUESTADDRESSLITERALS=$v"); fi
+            rc=0
+            env "${vars[@]}" build/Bin/CodeSizeValidation build/unittests/InstructionCountCI/Primary.json.instcountci \
+              >"$out/address-all-$v" 2>&1 || rc=$?
+            grep -E '^Guest address (load|call|rmw): ' "$out/address-all-$v" >"$out/address-$v" || true
+            sed "s/^/FEX_GUESTADDRESSLITERALS=$v: /" "$out/address-$v" | tee -a "$out/totals"
+            if (( rc >= 128 )); then
+              echo "::error::CodeSizeValidation ended with $rc with FEX_GUESTADDRESSLITERALS=$v"
+              tail -n 20 "$out/address-all-$v"
+              status=1
+            fi
+          done
+          for probe in load:2 call:2 rmw:5; do
+            name=${probe%:*} fewer=${probe#*:}
+            off=$(sed -n "s/^Guest address $name: \([0-9]*\) .*/\1/p" "$out/address-0")
+            on=$(sed -n "s/^Guest address $name: \([0-9]*\) .*/\1/p" "$out/address-1")
+            if [[ -z $off || -z $on ]] || (( on == 0 || on != off - fewer )); then
+              echo "::error::the $name above 4 GB has to be $fewer instructions shorter with FEX_GUESTADDRESSLITERALS=1: ${off:-none} off, ${on:-none} on"
+              status=1
+            fi
+          done
+          if [[ ! -s $out/address-0 ]] || ! cmp -s "$out/address-0" "$out/address-unset"; then
+            echo "::error::FEX_GUESTADDRESSLITERALS unset has to emit the probes as at 0"
             status=1
           fi
           exit "$status"

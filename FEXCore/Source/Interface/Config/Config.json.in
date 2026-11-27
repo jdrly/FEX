@@ -825,6 +825,15 @@
           "A return that the call-return stack predicts falls through to its ret.",
           "The L1 lookup for a return it doesn't predict moves after the unit's code, the same instructions in the same order."
         ]
+      },
+      "GuestAddressLiterals": {
+        "Type": "bool",
+        "Default": "false",
+        "AffectsCodeGen": "true",
+        "Desc": [
+          "A guest address above 4 GB, such as a return address or a [rip + ...] address, is one ldr of a literal placed after the unit's code",
+          "in place of three moves, four where code caching pads them. An instruction that reads and writes the same [rip + ...] builds the address once."
+        ]
       }
     }
   },

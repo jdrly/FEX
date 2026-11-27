@@ -29,6 +29,17 @@ public:
       CodeStart = nullptr;
       return;
     }
+
+    // My fork's probes of guest addresses run above 4 GB, where an address takes three moves as in GW2's image
+    // (jdrly/gw2-on-mac#391)
+    HighCodeStart = FEXCore::Allocator::mmap(reinterpret_cast<void*>(HIGH_CODE_START), HIGH_CODE_SIZE, PROT_READ | PROT_WRITE,
+                                             MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (reinterpret_cast<uint64_t>(HighCodeStart) != HIGH_CODE_START) {
+      // Not an assert: without it only the probes are missing, which my fork's runner reports
+      LogMan::Msg::EFmt("Couldn't allocate the region above 4 GB!");
+      FEXCore::Allocator::VirtualFree(HighCodeStart, HIGH_CODE_SIZE);
+      HighCodeStart = nullptr;
+    }
   }
 
   struct InstructionStats {
@@ -48,25 +59,27 @@ public:
   bool ParseMessage(const char* Message);
 
   InstructionData CompileAndGetStats(FEXCore::Context::Context* CTX, FEXCore::Core::InternalThreadState* Thread, const void* Data,
-                                     size_t SizeBytes, int32_t MaxInst = -1) {
-    if (SizeBytes > MAX_CODE_SIZE) {
+                                     size_t SizeBytes, int32_t MaxInst = -1, bool Above4GB = false) {
+    void* Code = Above4GB ? HighCodeStart : CodeStart;
+    const size_t CodeSize = Above4GB ? HIGH_CODE_SIZE : MAX_CODE_SIZE;
+    if (SizeBytes > CodeSize) {
       LogMan::Msg::AFmt("x86 code too large!");
     }
 
     {
       auto CodeInvalidationlk = FEXCore::GuardSignalDeferringSection(CTX->GetCodeInvalidationMutex(), Thread);
-      CTX->InvalidateCodeBuffersCodeRange(reinterpret_cast<uint64_t>(CodeStart), MAX_CODE_SIZE);
-      CTX->InvalidateThreadCachedCodeRange(Thread, reinterpret_cast<uint64_t>(CodeStart), MAX_CODE_SIZE);
+      CTX->InvalidateCodeBuffersCodeRange(reinterpret_cast<uint64_t>(Code), CodeSize);
+      CTX->InvalidateThreadCachedCodeRange(Thread, reinterpret_cast<uint64_t>(Code), CodeSize);
     }
 
     ClearStats();
-    memcpy(CodeStart, Data, SizeBytes);
+    memcpy(Code, Data, SizeBytes);
 
     if (MaxInst == -1) {
       // Compile the NOP.
-      CTX->CompileRIP(Thread, reinterpret_cast<uint64_t>(CodeStart));
+      CTX->CompileRIP(Thread, reinterpret_cast<uint64_t>(Code));
     } else {
-      CTX->CompileRIPCount(Thread, reinterpret_cast<uint64_t>(CodeStart), MaxInst);
+      CTX->CompileRIPCount(Thread, reinterpret_cast<uint64_t>(Code), MaxInst);
     }
     return CurrentStats;
   }
@@ -75,7 +88,7 @@ public:
     return SetupInfoDisabled;
   }
 
-  void CalculateBaseStats(FEXCore::Context::Context* CTX, FEXCore::Core::InternalThreadState* Thread);
+  void CalculateBaseStats(FEXCore::Context::Context* CTX, FEXCore::Core::InternalThreadState* Thread, bool Is64Bit);
 private:
   void ClearStats() {
     CurrentStats = {};
@@ -90,6 +103,9 @@ private:
 
   void* CodeStart {};
   constexpr static size_t MAX_CODE_SIZE = 512 * 1024 * 1024;
+  void* HighCodeStart {};
+  constexpr static uint64_t HIGH_CODE_START = 0x7'4000'0000;
+  constexpr static size_t HIGH_CODE_SIZE = 0x1'0000;
 
   bool SetupInfoDisabled {};
 };
@@ -164,7 +180,7 @@ bool CodeSizeValidation::ParseMessage(const char* Message) {
   return true;
 }
 
-void CodeSizeValidation::CalculateBaseStats(FEXCore::Context::Context* CTX, FEXCore::Core::InternalThreadState* Thread) {
+void CodeSizeValidation::CalculateBaseStats(FEXCore::Context::Context* CTX, FEXCore::Core::InternalThreadState* Thread, bool Is64Bit) {
   SetupInfoDisabled = true;
 
   // Known hardcoded instructions that will generate blocks of particular sizes.
@@ -220,6 +236,29 @@ void CodeSizeValidation::CalculateBaseStats(FEXCore::Context::Context* CTX, FEXC
     fextl::fmt::print(" [{}]", Exit[i].c_str());
   }
   fextl::fmt::print("\n");
+
+  // My fork's runner reports three instructions at an address above 4 GB with FEX_GUESTADDRESSLITERALS off and on
+  // (jdrly/gw2-on-mac#391), up to the block's exit: a [rip + ...] load, a direct call's push of its return address,
+  // and an add to [rip + ...], which reads and writes the same address.
+  if (Is64Bit && HighCodeStart) {
+    constexpr static struct {
+      const char* Name;
+      uint8_t Code[7];
+      size_t Size;
+    } Probes[] = {
+      {"load", {0x48, 0x8b, 0x05, 0x00, 0x01, 0x00, 0x00}, 7}, // mov rax, [rip + 0x100]
+      {"call", {0xe8, 0x00, 0x01, 0x00, 0x00}, 5},             // call +0x100
+      {"rmw", {0x48, 0x01, 0x05, 0x00, 0x01, 0x00, 0x00}, 7},  // add [rip + 0x100], rax
+    };
+    for (const auto& Probe : Probes) {
+      auto Stats = CompileAndGetStats(CTX, Thread, Probe.Code, Probe.Size, 1, true);
+      fextl::fmt::print("Guest address {}: {} instructions:", Probe.Name, Stats.second.size());
+      for (const auto& Line : Stats.second) {
+        fextl::fmt::print(" [{}]", Line.c_str());
+      }
+      fextl::fmt::print("\n");
+    }
+  }
 
   SetupInfoDisabled = false;
 }
@@ -578,6 +617,10 @@ int main(int argc, char** argv, char** const envp) {
   if (const char* ReturnLookupOutOfLine = getenv("FEX_RETURNLOOKUPOUTOFLINE")) {
     FEXCore::Config::Set(FEXCore::Config::CONFIG_RETURNLOOKUPOUTOFLINE, ReturnLookupOutOfLine);
   }
+  // and the guest address probes with this set (jdrly/gw2-on-mac#391)
+  if (const char* GuestAddressLiterals = getenv("FEX_GUESTADDRESSLITERALS")) {
+    FEXCore::Config::Set(FEXCore::Config::CONFIG_GUESTADDRESSLITERALS, GuestAddressLiterals);
+  }
 
   // Host feature override. Only supports overriding SVE width.
   enum HostFeatures {
@@ -797,7 +840,7 @@ int main(int argc, char** argv, char** const envp) {
   }
 
   // Calculate the base stats for instruction testing.
-  CodeSize::Validation->CalculateBaseStats(CTX.get(), ParentThread);
+  CodeSize::Validation->CalculateBaseStats(CTX.get(), ParentThread, TestHeaderData->Bitness == 64);
 
   // Test all the instructions.
   auto Result = TestInstructions(CTX.get(), ParentThread, argc >= 2 ? argv[2] : nullptr) ? 0 : 1;

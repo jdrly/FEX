@@ -365,10 +365,20 @@ retout=FEX_RETURNLOOKUPOUTOFLINE=1
 check retlookup both 60 retlookup.exe "$retlookup"
 check retlookup-on mine 60 retlookup.exe "$retlookup" $retout
 
+# jdrly/gw2-on-mac#391: FEX_GUESTADDRESSLITERALS, under which a guest address above 4 GB is one
+# ldr of a literal after the unit's code, and an instruction that reads and writes [rip + ...]
+# builds the address once. ripaddr.exe (tests/gw2/ripaddr.c), whose image sits at 0x140000000 as
+# GW2's does, runs 26 instructions that write memory on [rip + ...] and through a register, which
+# have to agree, and calls directly and through [rip + ...]. Off, under both FEXes, and on.
+ripaddr='gw2 test ripaddr: passed'
+addrlit=FEX_GUESTADDRESSLITERALS=1
+check ripaddr both 60 ripaddr.exe "$ripaddr"
+check ripaddr-on mine 60 ripaddr.exe "$ripaddr" $addrlit
+
 # The two rerun sets (jdrly/gw2-on-mac#325), under mine only. Every program whose cases ran again
 # under a set of my switches runs once under each:
-#   dev          each of my on-or-off switches on: both lookups (#161, #162) and the return
-#                lookup's (#343). The values of the others that dev-switches.conf sets (128 MB, keep, a fixed L1,
+#   dev          each of my on-or-off switches on: both lookups (#161, #162), the return
+#                lookup's (#343) and the guest address literals' (#391). The values of the others that dev-switches.conf sets (128 MB, keep, a fixed L1,
 #                disableavx) have cases of their own above.
 #   engine-like  both lookups at 0, as the engine's FEX finds blocks. A release build of my app
 #                runs the engine's FEX, so this is the path players run.
@@ -377,7 +387,7 @@ check retlookup-on mine 60 retlookup.exe "$retlookup" $retout
 # both. Each set runs Mach9's smoke test and entryfault once, one of them with
 # FEX_SMCCHECKS=full: FEX's default mode finds a write into code by the page's fault, full
 # checks each block, so each set has both.
-dev=(FEX_ENTRYHEADERLOOKUP=1 FEX_DISPATCHERL1LOOKUP=1 $retout)
+dev=(FEX_ENTRYHEADERLOOKUP=1 FEX_DISPATCHERL1LOOKUP=1 $retout $addrlit)
 enginelike=($lookupsoff)
 check smoke-default-dev mine 40 fex.exe "$smoke" $dev
 check smoke-smcchecks-full-engine-like mine 160 fex.exe "$smoke" $enginelike FEX_SMCCHECKS=full
@@ -409,3 +419,5 @@ check avx-hidden-dev mine 60 avx.exe "$avx" GW2_AVX_EXPECT=hidden $noavx $dev
 check avx-hidden-engine-like mine 60 avx.exe "$avx" GW2_AVX_EXPECT=hidden $noavx $enginelike
 check retlookup-dev mine 60 retlookup.exe "$retlookup" $dev
 check retlookup-engine-like mine 60 retlookup.exe "$retlookup" $enginelike
+check ripaddr-dev mine 60 ripaddr.exe "$ripaddr" $dev
+check ripaddr-engine-like mine 60 ripaddr.exe "$ripaddr" $enginelike

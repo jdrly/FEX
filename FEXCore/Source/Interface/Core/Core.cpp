@@ -895,6 +895,7 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
         if (TableInfo && TableInfo->OpcodeDispatcher.OpDispatch) {
           auto Fn = TableInfo->OpcodeDispatcher.OpDispatch;
           Thread->OpDispatcher->ResetHandledLock();
+          Thread->OpDispatcher->ResetRIPAddress();
           Thread->OpDispatcher->ResetDecodeFailure();
           IR::ForceTSOMode ForceTSO = IR::ForceTSOMode::NoOverride;
           if (BlockInForceTSOValidRange) {

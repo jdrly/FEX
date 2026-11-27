@@ -197,6 +197,9 @@ private:
     uint64_t GuestEntryOffset {};
   };
   fextl::vector<PendingReturnLookup> PendingReturnLookups;
+  // GW2 on Mac (jdrly/gw2-on-mac#391): with GuestAddressLiterals, the guest addresses that InsertGuestRIPMove loads
+  // with ldr, one literal per address, placed after the unit's code (JIT.cpp).
+  fextl::map<uint64_t, ARMEmitter::ForwardLabel> PendingGuestRIPLiterals;
 
   Utils::PoolBufferWithTimedRetirement<uint8_t*, 5000, 500> TempCodeBufferAllocator;
 

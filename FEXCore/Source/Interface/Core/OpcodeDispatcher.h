@@ -338,6 +338,10 @@ public:
   void ResetHandledLock() {
     HandledLock = false;
   }
+  // GW2 on Mac (jdrly/gw2-on-mac#391): before each instruction, Core.cpp forgets the last one's [rip + ...] address
+  void ResetRIPAddress() {
+    RIPAddress = {};
+  }
   bool HasHandledLock() const {
     return HandledLock;
   }
@@ -1448,6 +1452,14 @@ private:
 
   fextl::map<uint64_t, JumpTargetInfo> JumpTargets;
   bool HandledLock {false};
+  // GW2 on Mac (jdrly/gw2-on-mac#391): with GuestAddressLiterals, the [rip + ...] address the instruction being
+  // dispatched built, so that one that reads and writes it builds it once (DecodeAddress). Valid in the block it was
+  // built in, and forgotten before the next instruction.
+  struct {
+    Ref Address {};
+    Ref Block {};
+    uint64_t Target {};
+  } RIPAddress;
   bool DecodeFailure {false};
   bool NeedsBlockEnd {false};
   ForceTSOMode ForceTSO {ForceTSOMode::NoOverride};

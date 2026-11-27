@@ -384,6 +384,7 @@ public:
     FEX_CONFIG_OPT(MonoHacks, MONOHACKS);
     FEX_CONFIG_OPT(JITFeatures, JITFEATURES);
     FEX_CONFIG_OPT(ReturnLookupOutOfLine, RETURNLOOKUPOUTOFLINE);
+    FEX_CONFIG_OPT(GuestAddressLiterals, GUESTADDRESSLITERALS);
   } Config;
 
   bool SoftwareRNGEnabled() const {

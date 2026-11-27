@@ -907,6 +907,7 @@ CPUBackend::CompiledCode Arm64JITCore::EmitJITCode(uint64_t Entry, uint64_t Size
   CallReturnTargets.clear();
   PendingJumpThunks.clear();
   PendingReturnLookups.clear();
+  PendingGuestRIPLiterals.clear();
   X87PCWideBinops.clear();
   JumpTargets.resize(IR->GetHeader()->BlockCount, {});
   Relocations.resize(PrevNumAllocations, FEXCore::CPU::Relocation::Default()); // Discard any relocations generated from a previous attempt
@@ -1225,6 +1226,20 @@ CPUBackend::CompiledCode Arm64JITCore::EmitJITCode(uint64_t Entry, uint64_t Size
 
   BindOrRestart(&l_ExitLink);
   PlaceNamedSymbolLiteral(InsertNamedSymbolLiteral(RelocNamedSymbolLiteral::NamedSymbol::SYMBOL_LITERAL_EXITFUNCTION_LINKER));
+
+  // GW2 on Mac (jdrly/gw2-on-mac#391): the guest addresses InsertGuestRIPMove loads with ldr, each with the relocation
+  // its move would have had. One out of ldr's 1 MB reach restarts the unit with far jumps, which keeps the moves. The
+  // labels stay in PendingGuestRIPLiterals, which the restart clears, since the long jump skips local destructors.
+  if (!PendingGuestRIPLiterals.empty()) {
+    Align(8);
+    for (auto& [GuestRIP, Label] : PendingGuestRIPLiterals) {
+      BindOrRestart(&Label);
+      auto Lit = InsertGuestRIPLiteral(GuestRIP);
+      Lit.MoveABI.Header.Offset = GetCursorOffset();
+      dc64(GuestRIP);
+      Relocations.emplace_back(Lit.MoveABI);
+    }
+  }
 
   // CodeSize not including the header or tail data.
   const uint64_t CodeOnlySize = GetCursorAddress<uint8_t*>() - CodeBegin;
