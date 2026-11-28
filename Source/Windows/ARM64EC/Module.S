@@ -139,6 +139,10 @@ ExitFunctionEC:
   and x17, x17, #~6 // NEP + AH
   msr fpcr, x17
 2:
+  // ExitFPCRCheck=afp without AFP (ProcessInit): CpuStateFrame::Pointers.ExitFunctionEC points here, past the FPCR
+  // read and tests, as nothing sets either bit. ExitFunctionEC's own bytes are the same in both modes.
+.global ExitFunctionECSkipFPCR
+ExitFunctionECSkipFPCR:
   ldr x17, [x18, #0x1788] // TEB->ChpeV2CpuAreaInfo
   strb wzr, [x17, #0x0] // ChpeV2CpuAreaInfo->InSimulation
   ldr x17, [x17, #0x20] // ChpeV2CpuAreaInfo->SuspendDoorbell
@@ -318,13 +322,19 @@ end:
   // ExitFunctionEC for a thread with a stats slot: ThreadInit points CpuStateFrame::Pointers.ExitFunctionEC, through
   // which the JIT exits, here instead, so ExitFunctionEC itself is unchanged and a thread without a slot pays nothing.
   // Like ExitFunctionEC's first instructions it runs with InSimulation set and keeps NZCV and FPCR. x16, x17 and x23
-  // are free: ExitFunctionEC overwrites them before reading them.
-.global ExitFunctionECCounted
-ExitFunctionECCounted:
+  // are free: ExitFunctionEC overwrites them before reading them. ExitFunctionECCountedSkipFPCR is the same count in
+  // front of ExitFunctionECSkipFPCR.
+.macro EXIT_FUNCTION_COUNTED Name, Exit
+.global \Name
+\Name:
   ldr x17, [x18, #0x1788] // TEB->ChpeV2CpuAreaInfo
   ldr x17, [x17, #0x20] // ChpeV2CpuAreaInfo->SuspendDoorbell
   ldr x16, [x17, #0x8] // CpuStateFrame::ThreadStats
   ldr x23, [x16, #0x78] // ThreadStats::AccumulatedNativeExitCount
   add x23, x23, #1
   str x23, [x16, #0x78]
-  b ExitFunctionEC
+  b \Exit
+.endm
+
+EXIT_FUNCTION_COUNTED ExitFunctionECCounted, ExitFunctionEC
+EXIT_FUNCTION_COUNTED ExitFunctionECCountedSkipFPCR, ExitFunctionECSkipFPCR

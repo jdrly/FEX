@@ -43,7 +43,8 @@
 #   of FEX_PROFILESTATS's stats object: $BASE_VERSION under the engine's files, this commit's under
 #   mine.
 #   To add a test: the program as tests/gw2/<name>.c (built for Win64 x86_64 as <name>.exe, with
-#   tests/gw2/gw2test.h when the reader has to look at it) and one line in tests/gw2/cases.zsh:
+#   tests/gw2/gw2test.h when the reader has to look at it; a native ARM64EC DLL it loads as
+#   tests/gw2/arm64ec/<name>.c, built as <name>.dll next to it) and one line in tests/gw2/cases.zsh:
 #   check (a line it has to print), stats (the same, plus a pattern the reader's last read has to
 #   match) or report (a yes or no from a case's log). engine.zsh's header says how each works.
 # core: FEX's own tests on GitHub's arm64 Linux runner ($CORE_RUNNER), FEX built natively, with
@@ -532,7 +533,8 @@ jobs:
           if-no-files-found: error
 
       # The test stage's programs: Mach9's smoke/fex.c and each tests/gw2/*.c for Win64 x86_64 with
-      # llvm-mingw, and fexstats natively against this commit's FEX headers
+      # llvm-mingw, each tests/gw2/arm64ec/*.c as an ARM64EC DLL, and fexstats natively against this
+      # commit's FEX headers
       - name: The test stage's programs
         id: programs
         if: ${{ !cancelled() && steps.stage.outcome == 'success' }}
@@ -545,6 +547,12 @@ jobs:
           "$MINGW_DIR/bin/x86_64-w64-mingw32-clang" -O2 -o "$t/fex.exe" "$t/fex.c"
           for c in "$SRC"/tests/gw2/*.c; do
             "$MINGW_DIR/bin/x86_64-w64-mingw32-clang" -O2 -Wall -Werror -o "$t/$(basename "$c" .c).exe" "$c"
+          done
+          # native ARM64EC DLLs that a program loads, such as fpcr.dll for fpcr.exe (jdrly/gw2-on-mac#392).
+          # A pull request's head may predate the directory, so an unmatched glob builds nothing.
+          for c in "$SRC"/tests/gw2/arm64ec/*.c; do
+            [[ -f $c ]] || continue
+            "$MINGW_DIR/bin/arm64ec-w64-mingw32-clang" -O2 -Wall -Werror -shared -o "$t/$(basename "$c" .c).dll" "$c"
           done
           # FEX's arm64 path in SHMStats.h; CMake sets ARCHITECTURE_arm64 for FEX's own builds
           /usr/bin/clang++ -std=c++20 -O2 -Wall -Werror -DARCHITECTURE_arm64 -o "$t/fexstats" "$SRC/tests/gw2/native/fexstats.cpp" \

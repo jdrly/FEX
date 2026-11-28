@@ -375,10 +375,44 @@ addrlit=FEX_GUESTADDRESSLITERALS=1
 check ripaddr both 60 ripaddr.exe "$ripaddr"
 check ripaddr-on mine 60 ripaddr.exe "$ripaddr" $addrlit
 
+# jdrly/gw2-on-mac#392: FEX_EXITFPCRCHECK. Under afp without AFP, an exit from JIT code into native
+# code skips its FPCR read, and FEX logs "Exits to native code skip the FPCR check". fpcr.exe
+# (tests/gw2/fpcr.c) calls a native function in fpcr.dll 1,000 times and fails if one found
+# FPCR.AH or FPCR.NEP set. With FEX_HOSTFEATURES=enableafp the JIT sets both at each entry, so the
+# exit has to clear them: under both FEXes with the variable unset (always), and under mine with
+# afp, which has to keep the full exit while AFP is in use. afp-cpu says whether this runner's CPU
+# keeps AH at all. Where it doesn't, those two cases pass whatever the exit does, and only
+# exit_thunk's checks of the log line say which exit FEX chose. Then afp alone, and Mach9's smoke
+# test with it.
+fpcr='gw2 test fpcr: passed'
+fpcrlog=(FEX_SILENTLOG=0 WINEDEBUG=)
+# exit_thunk <label> <yes|no>: whether FEX logged that it chose the exits without the FPCR check
+exit_thunk() {
+  [[ $which == mine ]] && (( ${+ran[$1]} )) || return 0
+  local said=no log=()
+  [[ -f $prefix/$1.log ]] && log=(${(f)"$(tr -d '\r' <"$prefix/$1.log")"})
+  (( ${log[(I)*FEX: Exits to native code skip the FPCR check*]} )) && said=yes
+  if [[ $said == "$2" ]]; then
+    print "ok    $1-exit: skips the FPCR check: $said"
+  else
+    print "FAIL  $1-exit: skips the FPCR check: $said, wanted $2"
+    failed+=1
+  fi
+}
+check fpcr-enableafp both 40 fpcr.exe "$fpcr" FEX_HOSTFEATURES=enableafp $fpcrlog
+report afp-cpu fpcr-enableafp '*this CPU keeps FPCR.AH: yes*'
+exit_thunk fpcr-enableafp no
+check fpcr-afp-enableafp mine 40 fpcr.exe "$fpcr" FEX_EXITFPCRCHECK=afp FEX_HOSTFEATURES=enableafp $fpcrlog
+exit_thunk fpcr-afp-enableafp no
+check fpcr-afp mine 40 fpcr.exe "$fpcr" FEX_EXITFPCRCHECK=afp $fpcrlog
+exit_thunk fpcr-afp yes
+check smoke-exitfpcr-afp mine 40 fex.exe "$smoke" FEX_EXITFPCRCHECK=afp
+
 # The two rerun sets (jdrly/gw2-on-mac#325), under mine only. Every program whose cases ran again
 # under a set of my switches runs once under each:
 #   dev          each of my on-or-off switches on: both lookups (#161, #162), the return
-#                lookup's (#343) and the guest address literals' (#391). The values of the others that dev-switches.conf sets (128 MB, keep, a fixed L1,
+#                lookup's (#343), the guest address literals' (#391) and the exit's FPCR check
+#                at afp (#392). The values of the others that dev-switches.conf sets (128 MB, keep, a fixed L1,
 #                disableavx) have cases of their own above.
 #   engine-like  both lookups at 0, as the engine's FEX finds blocks. A release build of my app
 #                runs the engine's FEX, so this is the path players run.
@@ -387,7 +421,7 @@ check ripaddr-on mine 60 ripaddr.exe "$ripaddr" $addrlit
 # both. Each set runs Mach9's smoke test and entryfault once, one of them with
 # FEX_SMCCHECKS=full: FEX's default mode finds a write into code by the page's fault, full
 # checks each block, so each set has both.
-dev=(FEX_ENTRYHEADERLOOKUP=1 FEX_DISPATCHERL1LOOKUP=1 $retout $addrlit)
+dev=(FEX_ENTRYHEADERLOOKUP=1 FEX_DISPATCHERL1LOOKUP=1 $retout $addrlit FEX_EXITFPCRCHECK=afp)
 enginelike=($lookupsoff)
 check smoke-default-dev mine 40 fex.exe "$smoke" $dev
 check smoke-smcchecks-full-engine-like mine 160 fex.exe "$smoke" $enginelike FEX_SMCCHECKS=full

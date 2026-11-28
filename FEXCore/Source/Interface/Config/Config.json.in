@@ -834,6 +834,18 @@
           "A guest address above 4 GB, such as a return address or a [rip + ...] address, is one ldr of a literal placed after the unit's code",
           "in place of three moves, four where code caching pads them. An instruction that reads and writes the same [rip + ...] builds the address once."
         ]
+      },
+      "ExitFPCRCheck": {
+        "Type": "uint8",
+        "Default": "FEXCore::Config::CONFIG_EXITFPCRCHECK_ALWAYS",
+        "AffectsCodeGen": "false",
+        "TextDefault": "always",
+        "ArgumentHandler": "ExitFPCRCheckHandler",
+        "Desc": [
+          "ARM64EC only: whether an exit from JIT code into native code reads FPCR to clear AH and NEP.",
+          "\talways: Every exit reads FPCR and tests both bits (default)",
+          "\tafp: Only while AFP is in use. Without AFP nothing sets them, and the exit skips the read and the tests"
+        ]
       }
     }
   },
