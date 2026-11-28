@@ -4610,6 +4610,15 @@ AddressMode OpDispatchBuilder::DecodeAddress(const X86Tables::DecodedOp& Op, con
       if (Operand.IsRIPRelative() && Operand.Data.RIPLiteral.PatchableDisp) {
         A.Base = _PatchableGuestRIP(OpSize::i64Bit, Op->PC + Op->InstSize + static_cast<int32_t>(Operand.Data.RIPLiteral.Value),
                                     Op->PC + Operand.Data.RIPLiteral.DispOffset, 4);
+      } else if (CTX->Config.GuestAddressLiterals()) {
+        // GW2 on Mac (jdrly/gw2-on-mac#391): add [rip + ...], reg and the other instructions that read and write
+        // memory decode their address twice, for the load and for the store. The second takes the first's.
+        const int64_t Offset = static_cast<int32_t>(Operand.Data.RIPLiteral.Value);
+        const uint64_t Target = Op->PC + Op->InstSize + Offset;
+        if (!RIPAddress.Address || RIPAddress.Block != GetCurrentBlock() || RIPAddress.Target != Target) {
+          RIPAddress = {GetRelocatedPC(Op, Offset), GetCurrentBlock(), Target};
+        }
+        A.Base = RIPAddress.Address;
       } else {
         A.Base = GetRelocatedPC(Op, static_cast<int32_t>(Operand.Data.RIPLiteral.Value));
       }

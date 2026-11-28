@@ -54,6 +54,7 @@ How to read the columns:
 | `suspend-fix` | 1 | A thread spinning in a loop closed by a conditional backward branch can be suspended (#14). The JIT emits the check on Windows only | `FEX_CONDBACKEDGESUSPEND` (off), gone since the drop | shipped, unset | An ADR only | Two instructions more per taken conditional back-edge, for a problem nobody has seen in play. I asked why we were adding something that costs frames, and kept it out of dev builds (the app's ADR 0009, 2026-11-15) | **dropped 2026-11-26** (ADR 0012). Last in `gw2-on-mac` at `537a2281c` |
 | `return-lookup` | 1 | A predicted guest return falls through to its `ret`, and the L1 lookup for a missed one moves after the unit's code (#25, from Squark's patch `0045`) | `FEX_RETURNLOOKUPOUTOFLINE` (off) | not in 0.2.1 | None yet. jdrly/gw2-on-mac#350 adds its dev list row | 48 bytes a return site off, 16 on plus 36 after the unit (ADR 0010). Squark's author measured 3.19 to 2.58 ns a call with 4,096 small functions. No number from GW2: jdrly/gw2-on-mac#343 waits for my on and off sessions | **decide.** Never a default. The open case is #343's sessions |
 | `upstream-shufps` | 1 | FEX-Emu's `604f018` and its test `b5a4954`, picked as they are with their authors (jdrly/gw2-on-mac#381): a `SHUFPS` with the same register as both sources takes `PSHUFD`'s one-source path. It came after the head this table was written against | none. It is upstream's code in upstream's file, without the switch ADR 0002 asks for, as #381 decided: every shuffle gives the same result on my Mac, and a switch of mine would conflict when the base brings the commit. On a host with SVE256, which my Mac doesn't have, `vshufps xmm, xmm, xmm, 0xe4` now keeps the source's upper lane, where the old code cleared it (review of #381) | not in 0.2.1 | no | `Gw2-64.exe` has 9,789 `shufps` with one register twice. 7,255 have an immediate other than 0 and take the new path. 4,977 of those are broadcasts, three instructions before and one after, and 0xc9's 1,214 go from a two-table lookup to a one-table one (the triage of 2026-11-27). No number from play | **keep until the base has it.** A replay onto a base that has both `604f018` and `b5a4954` reports it empty, and the topic goes |
+| `guest-address-literal` | 1 | A guest address above 4 GB, a return address or a `[rip + …]` address, is one `ldr` of a literal after the unit's code in place of three moves, and an instruction that reads and writes `[rip + …]` builds the address once (ADR 0014, jdrly/gw2-on-mac#391). It came after the head this table was written against | `FEX_GUESTADDRESSLITERALS` (off) | not in 0.2.1 | None yet. Its dev list row is for me to file | On the 3,109 units of #175's busy span 41,262 guest addresses built in three moves or two become 41,170 `ldr`s: a direct call is 5 instructions in place of 7 (17,907 calls of that shape) and a `[rip + …]` load 2 in place of 4 (2,850). 1.48% of the game thread's samples sat on the moves (the hot-code study of 2026-11-27, lever 3). No number from play | **decide.** Never a default. The open case is a session on and off |
 | `kept-0.3.1-history` | 31 | athei's 10 commits of the 0.3.1 base and my 21 on them, reachable under the merges | n/a | n/a | n/a | n/a | **keep as history.** Not replayed. Its content is in the 30 |
 | `engine-move-merges` | 2 | `4af914c59`, with `597e7ccbedd`'s tree, and `35f3f2d0c` (#21), with `8a969bc74`'s | n/a | n/a | n/a | n/a | **keep as history.** No tree effect |
 
@@ -66,8 +67,8 @@ Numbers like #25 are this fork's pull requests. The triage is my workspace's
 
 - **Does `fex` default to mine in a release?** Until it does, the whole series is carried for dev
   builds and for `set fex mine`. `block-lookups` is the one topic with a result from play.
-- **Open:** `code-buffer`, `tso-syscalls`, `avx-hide` and `return-lookup`. None has a number from
-  play.
+- **Open:** `code-buffer`, `tso-syscalls`, `avx-hide`, `return-lookup` and `guest-address-literal`.
+  None has a number from play.
 
 ### Dropped
 
@@ -251,6 +252,7 @@ avx-hide
 singlestep-fix
 suspend-fix
 return-lookup
+guest-address-literal
 engine-pins
 ```
 
@@ -274,6 +276,7 @@ avx-hide AVX: A rule can hide it from the game with FEX_HOSTFEATURES=disableavx
 singlestep-fix Single-step: Indirect branches go through the dispatcher while TF is set, behind a switch
 suspend-fix Suspend: A thread spinning in a loop closed by a conditional backward branch can be suspended, behind a switch
 return-lookup Returns: A predicted return falls through to its ret, and the L1 lookup moves after the unit, behind a switch
+guest-address-literal Guest addresses: An address above 4 GB is one ldr of a literal after the unit's code, behind a switch
 upstream-shufps SHUFPS: Upstream's one-source SHUFPS takes PSHUFD's path (FEX-Emu 604f018 and b5a4954)
 engine-pins Engine pins: The check against Mach9 0.4.0's engine, my disk cache version and the regenerated listings
 ```

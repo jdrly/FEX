@@ -89,6 +89,14 @@ auto Arm64JITCore::InsertGuestRIPLiteral(uint64_t GuestRIP) -> NamedSymbolLitera
 }
 
 void Arm64JITCore::InsertGuestRIPMove(ARMEmitter::Register Reg, uint64_t Constant) {
+  // GW2 on Mac (jdrly/gw2-on-mac#391): with GuestAddressLiterals, an address above 4 GB, three moves below (four with
+  // code caching's padding), is one ldr of a literal after the unit's code (JIT.cpp), and the literal carries the
+  // relocation. A unit restarted for far jumps keeps the moves, since its end can be out of ldr's reach.
+  if (CTX->Config.GuestAddressLiterals() && !RequiresFarARM64Jumps && (Constant >> 32) != 0) {
+    ldr(Reg.X(), &PendingGuestRIPLiterals[Constant]);
+    return;
+  }
+
   Relocation MoveABI {};
   MoveABI.GuestRIP.Header = {.Offset = GetCursorOffset(), .Type = FEXCore::CPU::RelocationTypes::RELOC_GUEST_RIP_MOVE};
   // NOTE: Cache serialization will subtract the guest binary base address later to produce consistency results
