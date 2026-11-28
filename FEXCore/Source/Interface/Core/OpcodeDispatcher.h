@@ -205,11 +205,13 @@ public:
   }
   IRPair<IROp_ExitFunction> ExitFunction(Ref NewRIP, BranchHint Hint = BranchHint::None) {
     FlushRegisterCache();
+    InvalidateABIFlags();
     return _ExitFunction(GetOpSize(NewRIP), NewRIP, Hint, InvalidNode, InvalidNode);
   }
   IRPair<IROp_ExitFunction> ExitFunction(Ref NewRIP, BranchHint Hint, Ref CallReturnAddress, Ref CallReturnBlock,
                                          uint64_t PatchSiteAddress = 0, uint64_t PatchSiteSize = 0) {
     FlushRegisterCache();
+    InvalidateABIFlags();
     return _ExitFunction(GetOpSize(NewRIP), NewRIP, Hint, CallReturnAddress, CallReturnBlock, PatchSiteAddress, PatchSiteSize);
   }
   IRPair<IROp_Break> Break(BreakDefinition Reason, Ref RelocatedPC = nullptr) {
@@ -1423,6 +1425,17 @@ private:
 
   FEXCore::Context::ContextImpl* CTX {};
   FEXCore::Core::InternalThreadState* Thread;
+
+  // FEX_ABIFLAGS (jdrly/gw2-on-mac#390): RETOp, CALLOp and CALLAbsoluteOp set this for a call or return whose flags the
+  // Windows x64 ABI leaves undefined, and the exit marks them all written there. The marker goes after the flush, which
+  // writes back the carry's polarity and the PF and AF registers, so the dead-flag pass drops those too. DF stays.
+  bool ABIFlagsDeadAtExit {};
+  void InvalidateABIFlags() {
+    if (ABIFlagsDeadAtExit) {
+      ABIFlagsDeadAtExit = false;
+      _InvalidateFlags(FullNZCVMask | (1U << FEXCore::X86State::RFLAG_PF_RAW_LOC) | (1U << FEXCore::X86State::RFLAG_AF_RAW_LOC));
+    }
+  }
 
   constexpr static unsigned FullNZCVMask = (1U << FEXCore::X86State::RFLAG_CF_RAW_LOC) | (1U << FEXCore::X86State::RFLAG_ZF_RAW_LOC) |
                                            (1U << FEXCore::X86State::RFLAG_SF_RAW_LOC) | (1U << FEXCore::X86State::RFLAG_OF_RAW_LOC);

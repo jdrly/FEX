@@ -363,6 +363,7 @@ int main(int argc, char** argv, char** const envp) {
       LogMan::Msg::EFmt("Failed to map {}-bit elf file.", Loader.Is64BitMode() ? 64 : 32);
       return -ENOEXEC;
     }
+    CTX->SetABIFlagsRange(Loader.DefaultRIP(), Loader.CodeEnd());
 
     auto ParentThread = SyscallHandler->TM.CreateThread();
     ParentThread->Thread->CurrentFrame->State.rip = Loader.DefaultRIP();

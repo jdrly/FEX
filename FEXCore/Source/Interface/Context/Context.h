@@ -253,6 +253,16 @@ public:
 
   void RemoveForceTSOInformation(uint64_t Address, uint64_t Size) override;
 
+  void SetABIFlagsRange(uint64_t Begin, uint64_t End) override {
+    ABIFlagsBegin = Begin;
+    ABIFlagsEnd = End;
+  }
+
+  // Whether FEX_ABIFLAGS makes the flags dead at a call or a return (Exit: CONFIG_ABIFLAGS_RET or _CALL) at guest PC
+  bool ABIFlagsDead(uint64_t PC, uint8_t Exit) const {
+    return (Config.ABIFlags() & Exit) && PC >= ABIFlagsBegin && PC < ABIFlagsEnd;
+  }
+
   void MarkMonoDetected() override {
     MonoDetected = true;
   }
@@ -386,6 +396,7 @@ public:
     FEX_CONFIG_OPT(ReturnLookupOutOfLine, RETURNLOOKUPOUTOFLINE);
     FEX_CONFIG_OPT(GuestAddressLiterals, GUESTADDRESSLITERALS);
     FEX_CONFIG_OPT(SkipReturnSiteSuspendCheck, SKIPRETURNSITESUSPENDCHECK);
+    FEX_CONFIG_OPT(ABIFlags, ABIFLAGS);
   } Config;
 
   bool SoftwareRNGEnabled() const {
@@ -532,6 +543,8 @@ private:
     void* Data;
   };
   fextl::unordered_map<uint64_t, CustomIRHandlerEntry> CustomIRHandlers;
+  uint64_t ABIFlagsBegin {};
+  uint64_t ABIFlagsEnd {};
   IntervalList<uint64_t> ForceTSOValidRanges; // The ranges for which ForceTSOInstructions has populated data
   fextl::set<uint64_t> ForceTSOInstructions;
 

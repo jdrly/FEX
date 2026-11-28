@@ -856,6 +856,21 @@
           "The fold looks past the guest-opcode marker before the jump and past TEST's flag invalidation, which stop it otherwise."
         ]
       },
+      "ABIFlags": {
+        "Type": "uint8",
+        "Default": "FEXCore::Config::CONFIG_ABIFLAGS_OFF",
+        "AffectsCodeGen": "true",
+        "TextDefault": "off",
+        "ArgumentHandler": "ABIFlagsHandler",
+        "Desc": [
+          "Where the Windows x64 ABI's undefined arithmetic flags are dead, in the code range the frontend registers:",
+          "on ARM64EC the main executable's .text, elsewhere nothing. The flags a call or a return leaves are computed only where code before it reads them.",
+          "\toff: Every flag stays live across a call and a return (default)",
+          "\tret: Dead at a return",
+          "\tcall: Dead at a call",
+          "\tboth: Dead at both"
+        ]
+      },
       "SkipReturnSiteSuspendCheck": {
         "Type": "bool",
         "Default": "false",

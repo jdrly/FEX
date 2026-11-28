@@ -43,6 +43,16 @@ namespace Handler {
     }
     return "0";
   }
+  static inline std::optional<fextl::string> ABIFlagsHandler(std::string_view Value) {
+    if (Value == "ret") {
+      return "1";
+    } else if (Value == "call") {
+      return "2";
+    } else if (Value == "both") {
+      return "3";
+    }
+    return "0";
+  }
 } // namespace Handler
 
 enum ConfigOption {
@@ -68,6 +78,14 @@ enum ConfigHardwareTSOSyscalls {
 enum ConfigExitFPCRCheck {
   CONFIG_EXITFPCRCHECK_ALWAYS,
   CONFIG_EXITFPCRCHECK_AFP,
+};
+
+// A mask: CONFIG_ABIFLAGS_BOTH is RET | CALL
+enum ConfigABIFlags {
+  CONFIG_ABIFLAGS_OFF = 0,
+  CONFIG_ABIFLAGS_RET = 1,
+  CONFIG_ABIFLAGS_CALL = 2,
+  CONFIG_ABIFLAGS_BOTH = 3,
 };
 
 enum class LayerType {

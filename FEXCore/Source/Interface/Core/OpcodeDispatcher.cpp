@@ -115,6 +115,7 @@ void OpDispatchBuilder::RETOp(OpcodeArgs) {
   StoreGPRRegister(X86State::REG_RSP, SP);
 
   // Store the new RIP
+  ABIFlagsDeadAtExit = CTX->ABIFlagsDead(Op->PC, FEXCore::Config::CONFIG_ABIFLAGS_RET);
   ExitFunction(NewRIP, BranchHint::Return);
   BlockSetRIP = true;
 }
@@ -560,6 +561,7 @@ void OpDispatchBuilder::CALLOp(OpcodeArgs) {
     // Store the RIP
     const uint64_t NextRIP = Op->PC + Op->InstSize;
 
+    ABIFlagsDeadAtExit = CTX->ABIFlagsDead(Op->PC, FEXCore::Config::CONFIG_ABIFLAGS_CALL);
     ExitRelocatedPC(Op, TargetOffset, BranchHint::Call, ConstantPC, [&]() {
       auto CallReturnJumpTarget = JumpTargets.find(NextRIP);
       if (CallReturnJumpTarget != JumpTargets.end() && CallReturnJumpTarget->second.IsEntryPoint) {
@@ -584,6 +586,7 @@ void OpDispatchBuilder::CALLAbsoluteOp(OpcodeArgs) {
 
   // Store the RIP
   const uint64_t NextRIP = Op->PC + Op->InstSize;
+  ABIFlagsDeadAtExit = CTX->ABIFlagsDead(Op->PC, FEXCore::Config::CONFIG_ABIFLAGS_CALL);
   ExitFunction(JMPPCOffset, BranchHint::Call, ConstantPC, [&]() {
     auto CallReturnJumpTarget = JumpTargets.find(NextRIP);
     if (CallReturnJumpTarget != JumpTargets.end() && CallReturnJumpTarget->second.IsEntryPoint) {
