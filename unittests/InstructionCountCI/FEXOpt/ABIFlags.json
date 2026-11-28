@@ -1,0 +1,95 @@
+{
+  "Features": {
+    "Env": {
+      "FEX_ABIFLAGS": "both"
+    },
+    "Bitness": 64,
+    "EnabledHostFeatures": [
+      "FLAGM",
+      "FLAGM2"
+    ],
+    "DisabledHostFeatures": [
+      "SVE128",
+      "SVE256",
+      "AFP",
+      "MOPS"
+    ],
+    "BinaryCacheVersion": 65
+  },
+  "Comment": [
+    "jdrly/gw2-on-mac#390: FEX_ABIFLAGS=both. The Windows x64 ABI leaves the arithmetic flags undefined across a call and",
+    "a return, so nothing after one reads what the code before it set. The flags those instructions write are computed",
+    "only where the code before the exit reads them: the MSVC epilogue drops the carry's polarity fix-up and the PF and",
+    "AF copies, a compare right before a ret goes. CodeSizeValidation registers its code region as the range the option",
+    "acts in, as the ARM64EC frontend registers the main executable's .text. ABIFlags_Off.json has the same code unset."
+  ],
+  "Instructions": {
+    "add rsp, 0x28; pop rbx; ret": {
+      "x86InstructionCount": 3,
+      "ExpectedInstructionCount": 2,
+      "x86Insts": [
+        "add rsp, 0x28",
+        "pop rbx",
+        "ret"
+      ],
+      "ExpectedArm64ASM": [
+        "add x8, x8, #0x28 (40)",
+        "ldp x6, x20, [x8], #16"
+      ]
+    },
+    "and eax, ecx; ret": {
+      "x86InstructionCount": 2,
+      "ExpectedInstructionCount": 2,
+      "x86Insts": [
+        "and eax, ecx",
+        "ret"
+      ],
+      "ExpectedArm64ASM": [
+        "and w4, w4, w7",
+        "ldr x20, [x8], #8"
+      ]
+    },
+    "cmp eax, ecx; ret": {
+      "x86InstructionCount": 2,
+      "ExpectedInstructionCount": 1,
+      "x86Insts": [
+        "cmp eax, ecx",
+        "ret"
+      ],
+      "ExpectedArm64ASM": [
+        "ldr x20, [x8], #8"
+      ]
+    },
+    "sub eax, ecx; call": {
+      "x86InstructionCount": 5,
+      "ExpectedInstructionCount": 4,
+      "x86Insts": [
+        "sub eax, ecx",
+        "call .callee",
+        "int3",
+        ".callee:",
+        "ret"
+      ],
+      "ExpectedArm64ASM": [
+        "sub w4, w4, w7",
+        "mov w20, #0x7",
+        "movk w20, #0x1, lsl #16",
+        "str x20, [x8, #-8]!"
+      ]
+    },
+    "test ecx, ecx; call qword [rax]": {
+      "x86InstructionCount": 2,
+      "ExpectedInstructionCount": 4,
+      "x86Insts": [
+        "test ecx, ecx",
+        "call qword [rax]"
+      ],
+      "ExpectedArm64ASM": [
+        "ldr x20, [x4]",
+        "mov w21, #0x4",
+        "movk w21, #0x1, lsl #16",
+        "str x21, [x8, #-8]!"
+      ]
+    }
+  }
+}
