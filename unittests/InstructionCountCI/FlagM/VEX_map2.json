@@ -10,7 +10,7 @@
       "AFP",
       "SVEBITPERM"
     ],
-    "BinaryCacheVersion": 63
+    "BinaryCacheVersion": 64
   },
   "Instructions": {
     "vtestps xmm0, xmm1": {
