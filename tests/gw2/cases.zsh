@@ -408,11 +408,25 @@ check fpcr-afp mine 40 fpcr.exe "$fpcr" FEX_EXITFPCRCHECK=afp $fpcrlog
 exit_thunk fpcr-afp yes
 check smoke-exitfpcr-afp mine 40 fex.exe "$smoke" FEX_EXITFPCRCHECK=afp
 
+# jdrly/gw2-on-mac#395: FEX_FOLDBRANCHPASTMARKERS, under which a compare with zero and the jz or jnz
+# after it fold into one cbz or cbnz, and a float compare's axflag into the branch, when the flags
+# are dead after the jump. foldbranch.exe (tests/gw2/foldbranch.c) compares, branches and loads on
+# both exits, on inputs that take each exit, and faults at those loads: the exception has to name
+# the load of the exit x86 takes. The flags at the fault are printed, not checked: the fold drops
+# the compare or the axflag (ADR 0015). Off, under both FEXes, on, and on with
+# FEX_EXTENDEDDEBUGINFO=1, which gives every instruction a RIP entry, so a folded compare's entry
+# and its jump's share a host address.
+foldbranch='gw2 test foldbranch: passed'
+foldout=FEX_FOLDBRANCHPASTMARKERS=1
+check foldbranch both 60 foldbranch.exe "$foldbranch"
+check foldbranch-on mine 60 foldbranch.exe "$foldbranch" $foldout
+check foldbranch-on-extendeddebuginfo mine 60 foldbranch.exe "$foldbranch" $foldout FEX_EXTENDEDDEBUGINFO=1
+
 # The two rerun sets (jdrly/gw2-on-mac#325), under mine only. Every program whose cases ran again
 # under a set of my switches runs once under each:
 #   dev          each of my on-or-off switches on: both lookups (#161, #162), the return
-#                lookup's (#343), the guest address literals' (#391) and the exit's FPCR check
-#                at afp (#392). The values of the others that dev-switches.conf sets (128 MB, keep, a fixed L1,
+#                lookup's (#343), the guest address literals' (#391), the exit's FPCR check
+#                at afp (#392) and the branch fold's (#395). The values of the others that dev-switches.conf sets (128 MB, keep, a fixed L1,
 #                disableavx) have cases of their own above.
 #   engine-like  both lookups at 0, as the engine's FEX finds blocks. A release build of my app
 #                runs the engine's FEX, so this is the path players run.
@@ -421,7 +435,7 @@ check smoke-exitfpcr-afp mine 40 fex.exe "$smoke" FEX_EXITFPCRCHECK=afp
 # both. Each set runs Mach9's smoke test and entryfault once, one of them with
 # FEX_SMCCHECKS=full: FEX's default mode finds a write into code by the page's fault, full
 # checks each block, so each set has both.
-dev=(FEX_ENTRYHEADERLOOKUP=1 FEX_DISPATCHERL1LOOKUP=1 $retout $addrlit FEX_EXITFPCRCHECK=afp)
+dev=(FEX_ENTRYHEADERLOOKUP=1 FEX_DISPATCHERL1LOOKUP=1 $retout $addrlit FEX_EXITFPCRCHECK=afp $foldout)
 enginelike=($lookupsoff)
 check smoke-default-dev mine 40 fex.exe "$smoke" $dev
 check smoke-smcchecks-full-engine-like mine 160 fex.exe "$smoke" $enginelike FEX_SMCCHECKS=full
@@ -455,3 +469,5 @@ check retlookup-dev mine 60 retlookup.exe "$retlookup" $dev
 check retlookup-engine-like mine 60 retlookup.exe "$retlookup" $enginelike
 check ripaddr-dev mine 60 ripaddr.exe "$ripaddr" $dev
 check ripaddr-engine-like mine 60 ripaddr.exe "$ripaddr" $enginelike
+check foldbranch-dev mine 60 foldbranch.exe "$foldbranch" $dev
+check foldbranch-engine-like mine 60 foldbranch.exe "$foldbranch" $enginelike

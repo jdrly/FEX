@@ -61,9 +61,10 @@
 #   Three instructions CodeSizeValidation compiles above 4 GB, a [rip + …] load, a call's push of its
 #   return address and add [rip + …], rax, have to be 2, 2 and 5 instructions shorter with
 #   FEX_GUESTADDRESSLITERALS at 1 than at 0, and unset the same code as at 0 (jdrly/gw2-on-mac#391).
-#   The assembly tests run once more with #343's and #391's switches on (FEX_RETURNLOOKUPOUTOFLINE,
-#   FEX_GUESTADDRESSLITERALS), as a dev build of my app runs them. That pass is asm-cuts, named for
-#   #164's two switches, which it ran too until I dropped them on 2026-11-27 (docs/gw2/adr/0013).
+#   The assembly tests run once more with #343's, #391's and #395's switches on
+#   (FEX_RETURNLOOKUPOUTOFLINE, FEX_GUESTADDRESSLITERALS, FEX_FOLDBRANCHPASTMARKERS), as a dev build
+#   of my app runs them. That pass is asm-cuts, named for #164's two switches, which it ran too until
+#   I dropped them on 2026-11-27 (docs/gw2/adr/0013).
 #   The pass with FEX_DISPATCHERL1LOOKUP=0 and asm-cuts run on a push and on a
 #   pull request that changes FEXCore/Source/Interface/Core or this workflow (jdrly/gw2-on-mac#326).
 #   The failures are compared with tests/gw2/core-failures.txt, the
@@ -750,9 +751,9 @@ jobs:
               cat "$out/asm-l1lookup-off.diff"
               status=1
             fi
-            # #343's and #391's switches with the lookups, as a dev build of my app runs them. The name
-            # is from #164's two switches, dropped on 2026-11-27 (docs/gw2/adr/0013).
-            suite asm-cuts '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_RETURNLOOKUPOUTOFLINE=1 FEX_GUESTADDRESSLITERALS=1
+            # #343's, #391's and #395's switches with the lookups, as a dev build of my app runs them.
+            # The name is from #164's two switches, dropped on 2026-11-27 (docs/gw2/adr/0013).
+            suite asm-cuts '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_RETURNLOOKUPOUTOFLINE=1 FEX_GUESTADDRESSLITERALS=1 FEX_FOLDBRANCHPASTMARKERS=1
           else
             echo "asm-l1lookup-off, asm-cuts: not run, this pull request changes neither FEXCore/Source/Interface/Core nor the workflow" |
               tee -a "$out/totals"
@@ -850,9 +851,9 @@ jobs:
             echo "::error::no reference list $ref yet"
             exit 1
           fi
-          # the suites run again with FEX_ENTRYHEADERLOOKUP=0, and with #343's switch when that pass
-          # ran, have the same reference as the default runs
-          cuts=", its asm lines also for the run with #343's switch"
+          # the suites run again with FEX_ENTRYHEADERLOOKUP=0, and with the asm-cuts switches
+          # when that pass ran, have the same reference as the default runs
+          cuts=", its asm lines also for the run with the asm-cuts switches"
           [[ $PASSES != 0 ]] || cuts=""
           LC_ALL=C sort "$ref" <(sed -n 's/^asm /asm-lookup-off /p; s/^instcountci /instcountci-lookup-off /p' "$ref") \
             <(if [[ -n $cuts ]]; then sed -n 's/^asm /asm-cuts /p' "$ref"; fi) >"$out/reference"

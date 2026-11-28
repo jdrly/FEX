@@ -1,0 +1,140 @@
+{
+  "Features": {
+    "Bitness": 64,
+    "EnabledHostFeatures": [
+      "FLAGM",
+      "FLAGM2"
+    ],
+    "DisabledHostFeatures": [
+      "SVE128",
+      "SVE256",
+      "AFP",
+      "MOPS"
+    ],
+    "BinaryCacheVersion": 63
+  },
+  "Comment": [
+    "jdrly/gw2-on-mac#395: the code of FoldBranch.json without FEX_FOLDBRANCHPASTMARKERS. The guest-opcode marker",
+    "before each jump stops FoldBranch, so the compare and the axflag stay."
+  ],
+  "Instructions": {
+    "test ecx, ecx; jz": {
+      "x86InstructionCount": 9,
+      "ExpectedInstructionCount": 6,
+      "x86Insts": [
+        "test ecx, ecx",
+        "jz .taken",
+        "mov eax, [rdx]",
+        "xor eax, eax",
+        "ret",
+        ".taken:",
+        "mov eax, [rdx]",
+        "xor eax, eax",
+        "ret"
+      ],
+      "ExpectedArm64ASM": [
+        "cmp w7, #0x0 (0)",
+        "b.eq #+0x48",
+        "ldr w4, [x5]",
+        "subs w26, w4, w4",
+        "mov w4, #0x0",
+        "ldr x20, [x8], #8"
+      ]
+    },
+    "cmp rcx, 0; jne": {
+      "x86InstructionCount": 9,
+      "ExpectedInstructionCount": 6,
+      "x86Insts": [
+        "cmp rcx, 0",
+        "jne .taken",
+        "mov eax, [rdx]",
+        "xor eax, eax",
+        "ret",
+        ".taken:",
+        "mov eax, [rdx]",
+        "xor eax, eax",
+        "ret"
+      ],
+      "ExpectedArm64ASM": [
+        "cmp x7, #0x0 (0)",
+        "b.ne #+0x48",
+        "ldr w4, [x5]",
+        "subs w26, w4, w4",
+        "mov w4, #0x0",
+        "ldr x20, [x8], #8"
+      ]
+    },
+    "ucomiss xmm0, xmm1; ja": {
+      "x86InstructionCount": 9,
+      "ExpectedInstructionCount": 7,
+      "x86Insts": [
+        "ucomiss xmm0, xmm1",
+        "ja .taken",
+        "mov eax, [rdx]",
+        "xor eax, eax",
+        "ret",
+        ".taken:",
+        "mov eax, [rdx]",
+        "xor eax, eax",
+        "ret"
+      ],
+      "ExpectedArm64ASM": [
+        "fcmp s16, s17",
+        "axflag",
+        "b.hi #+0x48",
+        "ldr w4, [x5]",
+        "subs w26, w4, w4",
+        "mov w4, #0x0",
+        "ldr x20, [x8], #8"
+      ]
+    },
+    "ucomiss xmm0, xmm1; jb": {
+      "x86InstructionCount": 9,
+      "ExpectedInstructionCount": 7,
+      "x86Insts": [
+        "ucomiss xmm0, xmm1",
+        "jb .taken",
+        "mov eax, [rdx]",
+        "xor eax, eax",
+        "ret",
+        ".taken:",
+        "mov eax, [rdx]",
+        "xor eax, eax",
+        "ret"
+      ],
+      "ExpectedArm64ASM": [
+        "fcmp s16, s17",
+        "axflag",
+        "b.lo #+0x48",
+        "ldr w4, [x5]",
+        "subs w26, w4, w4",
+        "mov w4, #0x0",
+        "ldr x20, [x8], #8"
+      ]
+    },
+    "ucomiss xmm0, xmm1; jle": {
+      "x86InstructionCount": 9,
+      "ExpectedInstructionCount": 7,
+      "x86Insts": [
+        "ucomiss xmm0, xmm1",
+        "jle .taken",
+        "mov eax, [rdx]",
+        "xor eax, eax",
+        "ret",
+        ".taken:",
+        "mov eax, [rdx]",
+        "xor eax, eax",
+        "ret"
+      ],
+      "ExpectedArm64ASM": [
+        "fcmp s16, s17",
+        "axflag",
+        "b.le #+0x48",
+        "ldr w4, [x5]",
+        "subs w26, w4, w4",
+        "mov w4, #0x0",
+        "ldr x20, [x8], #8"
+      ]
+    }
+  }
+}
