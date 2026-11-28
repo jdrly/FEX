@@ -1,0 +1,98 @@
+{
+  "Features": {
+    "Bitness": 64,
+    "EnabledHostFeatures": [
+      "FLAGM",
+      "FLAGM2"
+    ],
+    "DisabledHostFeatures": [
+      "SVE128",
+      "SVE256",
+      "AFP",
+      "MOPS"
+    ],
+    "BinaryCacheVersion": 65
+  },
+  "Comment": [
+    "jdrly/gw2-on-mac#390: the code of ABIFlags.json without FEX_ABIFLAGS. Every flag stays live at a call and a return."
+  ],
+  "Instructions": {
+    "add rsp, 0x28; pop rbx; ret": {
+      "x86InstructionCount": 3,
+      "ExpectedInstructionCount": 5,
+      "x86Insts": [
+        "add rsp, 0x28",
+        "pop rbx",
+        "ret"
+      ],
+      "ExpectedArm64ASM": [
+        "adds x26, x8, #0x28 (40)",
+        "mov x27, x8",
+        "mov x8, x26",
+        "ldp x6, x20, [x8], #16",
+        "cfinv"
+      ]
+    },
+    "and eax, ecx; ret": {
+      "x86InstructionCount": 2,
+      "ExpectedInstructionCount": 4,
+      "x86Insts": [
+        "and eax, ecx",
+        "ret"
+      ],
+      "ExpectedArm64ASM": [
+        "ands w26, w4, w7",
+        "mov x4, x26",
+        "ldr x20, [x8], #8",
+        "cfinv"
+      ]
+    },
+    "cmp eax, ecx; ret": {
+      "x86InstructionCount": 2,
+      "ExpectedInstructionCount": 3,
+      "x86Insts": [
+        "cmp eax, ecx",
+        "ret"
+      ],
+      "ExpectedArm64ASM": [
+        "eor x27, x4, x7",
+        "subs w26, w4, w7",
+        "ldr x20, [x8], #8"
+      ]
+    },
+    "sub eax, ecx; call": {
+      "x86InstructionCount": 5,
+      "ExpectedInstructionCount": 6,
+      "x86Insts": [
+        "sub eax, ecx",
+        "call .callee",
+        "int3",
+        ".callee:",
+        "ret"
+      ],
+      "ExpectedArm64ASM": [
+        "eor x27, x4, x7",
+        "subs w26, w4, w7",
+        "mov x4, x26",
+        "mov w20, #0x7",
+        "movk w20, #0x1, lsl #16",
+        "str x20, [x8, #-8]!"
+      ]
+    },
+    "test ecx, ecx; call qword [rax]": {
+      "x86InstructionCount": 2,
+      "ExpectedInstructionCount": 5,
+      "x86Insts": [
+        "test ecx, ecx",
+        "call qword [rax]"
+      ],
+      "ExpectedArm64ASM": [
+        "subs w26, w7, #0x0 (0)",
+        "ldr x20, [x4]",
+        "mov w21, #0x4",
+        "movk w21, #0x1, lsl #16",
+        "str x21, [x8, #-8]!"
+      ]
+    }
+  }
+}

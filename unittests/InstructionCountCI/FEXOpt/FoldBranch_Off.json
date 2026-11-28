@@ -11,7 +11,7 @@
       "AFP",
       "MOPS"
     ],
-    "BinaryCacheVersion": 64
+    "BinaryCacheVersion": 65
   },
   "Comment": [
     "jdrly/gw2-on-mac#395: the code of FoldBranch.json without FEX_FOLDBRANCHPASTMARKERS. The guest-opcode marker",

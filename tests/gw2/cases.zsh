@@ -432,11 +432,38 @@ skipret=FEX_SKIPRETURNSITESUSPENDCHECK=1
 check callloop both 60 callloop.exe "$callloop" GW2_CALLLOOP_EXPECT=both
 check callloop-on mine 60 callloop.exe "$callloop" GW2_CALLLOOP_EXPECT=leaf $skipret
 
+# jdrly/gw2-on-mac#390: FEX_ABIFLAGS, under which the arithmetic flags are dead at a call and a
+# return in the main executable's .text, as the Windows x64 ABI leaves them undefined there.
+# abiflags.exe (tests/gw2/abiflags.c) passes CF and ZF across returns and calls from routines in a
+# section of their own, outside .text, where every flag has to arrive. Off, under both FEXes, and at
+# both, where FEX also logs the range it registered: abi_range checks that it is the .text the
+# program prints.
+abiflags='gw2 test abiflags: passed'
+abiout=FEX_ABIFLAGS=both
+# abi_range <label>: FEX's logged range is the program's .text
+abi_range() {
+  [[ $which == mine ]] && (( ${+ran[$1]} )) || return 0
+  local log=() text fex
+  [[ -f $prefix/$1.log ]] && log=(${(f)"$(tr -d '\r' <"$prefix/$1.log")"})
+  text=${${log[(r)gw2 test abiflags: .text *]:-}##* }
+  fex=${${log[(r)*FEX: ABIFlags * in the main executable?s .text *]:-}##* }
+  if [[ -n $text && $text == "$fex" ]]; then
+    print "ok    $1-range: FEX's range is the program's .text, $text"
+  else
+    print "FAIL  $1-range: FEX logged '${fex:-nothing}', the program's .text is '${text:-unknown}'"
+    failed+=1
+  fi
+}
+check abiflags both 60 abiflags.exe "$abiflags"
+check abiflags-both mine 60 abiflags.exe "$abiflags" $abiout FEX_SILENTLOG=0 WINEDEBUG=
+abi_range abiflags-both
+
 # The two rerun sets (jdrly/gw2-on-mac#325), under mine only. Every program whose cases ran again
 # under a set of my switches runs once under each:
 #   dev          each of my on-or-off switches on: both lookups (#161, #162), the return
 #                lookup's (#343), the guest address literals' (#391), the exit's FPCR check
-#                at afp (#392), the branch fold's (#395) and the return site's suspend check (#389).
+#                at afp (#392), the branch fold's (#395), the return site's suspend check (#389)
+#                and the flags at calls and returns at both (#390).
 #                The values of the others that dev-switches.conf sets (128 MB, keep, a fixed L1,
 #                disableavx) have cases of their own above.
 #   engine-like  both lookups at 0, as the engine's FEX finds blocks. A release build of my app
@@ -446,7 +473,7 @@ check callloop-on mine 60 callloop.exe "$callloop" GW2_CALLLOOP_EXPECT=leaf $ski
 # both. Each set runs Mach9's smoke test and entryfault once, one of them with
 # FEX_SMCCHECKS=full: FEX's default mode finds a write into code by the page's fault, full
 # checks each block, so each set has both.
-dev=(FEX_ENTRYHEADERLOOKUP=1 FEX_DISPATCHERL1LOOKUP=1 $retout $addrlit FEX_EXITFPCRCHECK=afp $foldout $skipret)
+dev=(FEX_ENTRYHEADERLOOKUP=1 FEX_DISPATCHERL1LOOKUP=1 $retout $addrlit FEX_EXITFPCRCHECK=afp $foldout $skipret $abiout)
 enginelike=($lookupsoff)
 check smoke-default-dev mine 40 fex.exe "$smoke" $dev
 check smoke-smcchecks-full-engine-like mine 160 fex.exe "$smoke" $enginelike FEX_SMCCHECKS=full
@@ -484,3 +511,5 @@ check foldbranch-dev mine 60 foldbranch.exe "$foldbranch" $dev
 check foldbranch-engine-like mine 60 foldbranch.exe "$foldbranch" $enginelike
 check callloop-dev mine 60 callloop.exe "$callloop" GW2_CALLLOOP_EXPECT=leaf $dev
 check callloop-engine-like mine 60 callloop.exe "$callloop" GW2_CALLLOOP_EXPECT=both $enginelike
+check abiflags-dev mine 60 abiflags.exe "$abiflags" $dev
+check abiflags-engine-like mine 60 abiflags.exe "$abiflags" $enginelike

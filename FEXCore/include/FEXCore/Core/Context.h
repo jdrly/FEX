@@ -215,6 +215,13 @@ public:
 
   FEX_DEFAULT_VISIBILITY virtual void RemoveForceTSOInformation(uint64_t Address, uint64_t Size) = 0;
 
+  /**
+   * @brief The guest code that follows the Windows x64 ABI at its calls and returns, for FEX_ABIFLAGS (jdrly/gw2-on-mac#390).
+   *
+   * Set once, before any code compiles. Without a range FEX_ABIFLAGS acts nowhere.
+   */
+  FEX_DEFAULT_VISIBILITY virtual void SetABIFlagsRange(uint64_t Begin, uint64_t End) = 0;
+
   FEX_DEFAULT_VISIBILITY virtual void MarkMonoDetected() = 0;
 
   FEX_DEFAULT_VISIBILITY virtual void MarkMonoBackpatcherBlock(uint64_t BlockEntry) = 0;

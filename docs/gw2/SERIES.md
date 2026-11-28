@@ -58,6 +58,7 @@ How to read the columns:
 | `exit-fpcr` | 1 | An exit from JIT code into native code skips its `FPCR` read and its AH and NEP tests when AFP is off, the only case in which nothing sets either bit (jdrly/gw2-on-mac#392). The exit is chosen once, at process start, and `ExitFunctionEC` keeps its bytes. It came after the head this table was written against | `FEX_EXITFPCRCHECK` (`always`, the engine's exit) | not in 0.2.1 | None yet. Its dev list row is `=afp` | 0.47% of the game thread's samples sit on that `mrs` in #175's session of 2026-11-27, at 28,000 to 43,000 exits a frame (the hot-code study's lever 5). The exit microbenchmark's ns a call are in the pull request. No number from play | **decide.** Never a default. The open case is a sampler session with `afp` |
 | `branch-fold` | 1 | `FoldBranch` looks past the guest-opcode marker before a `Jcc` and past `test`'s flag invalidation, so a compare with zero and its `jz` or `jnz` become one `cbz` or `cbnz`, and a float compare's `axflag` goes into its branch, when the flags are dead on both exits (ADR 0015, jdrly/gw2-on-mac#395, from aurora-silicon/fex `edd71e9`). It came after the head this table was written against | `FEX_FOLDBRANCHPASTMARKERS` (off) | not in 0.2.1 | None yet. Its dev list row is for me to file | On the 3,109 units of #175's busy span, 5,927 compares and 2,053 `axflag`s go: 1,088,837 words to 1,080,840 (the hot-code study's harness). 3.07% of the game thread's samples sat on a compare with zero before a flag branch, 0.82% of it on `subs` forms that keep PF and stay. A fault after a folded branch doesn't report x86's flags (ADR 0015). No number from play | **decide.** Never a default. The open case is a sampler session and fps on and off |
 | `return-site-suspend` | 1 | The block a call in the same unit returns to doesn't poll the suspend doorbell, since the callee's entry did (ADR 0016, jdrly/gw2-on-mac#389, the idea of Squark's `0035` and MetalSharp's `0011`). The JIT emits the poll on Windows only. It came after the head this table was written against | `FEX_SKIPRETURNSITESUSPENDCHECK` (off) | not in 0.2.1 | None yet. Its dev list row is for me to file | On the 3,109 units of #175's busy span the 24,095 checks at return sites go, and the 3,109 at units' first entries and 704 before backward jumps stay: two instructions less a call that returns. 0.74% of the game thread's samples sat on those checks (the hot-code study of 2026-11-27, lever 1). Squark measured 1.1% fewer instructions and no change in time. No number from play | **decide.** Never a default. The open case is a session on and off |
+| `abi-flags` | 1 | In the main executable's `.text` a `ret`, a `call` or both mark the six arithmetic flags written before their exit, so the dead-flag pass drops what only the exit would have read, as the Windows x64 ABI allows (ADR 0017, jdrly/gw2-on-mac#390). The ARM64EC frontend registers the range. My search of `Gw2-64.exe` found no function that passes a flag across either. It came after the head this table was written against | `FEX_ABIFLAGS` (`off`) | not in 0.2.1 | None yet. Its dev list row is `=both` | On the 3,109 units of #175's busy span, 1,088,837 host instructions become 1,079,931 at `ret`, 1,070,579 at `call` and 1,061,487 at `both`. 1.43% of the game thread's samples sat on the lines that go, 606 of them on `cfinv` (the hot-code study of 2026-11-27, lever 2). No number from play | **decide.** Never a default. The open case is fps and the precision checks on and off |
 | `kept-0.3.1-history` | 31 | athei's 10 commits of the 0.3.1 base and my 21 on them, reachable under the merges | n/a | n/a | n/a | n/a | **keep as history.** Not replayed. Its content is in the 30 |
 | `engine-move-merges` | 2 | `4af914c59`, with `597e7ccbedd`'s tree, and `35f3f2d0c` (#21), with `8a969bc74`'s | n/a | n/a | n/a | n/a | **keep as history.** No tree effect |
 
@@ -71,7 +72,7 @@ Numbers like #25 are this fork's pull requests. The triage is my workspace's
 - **Does `fex` default to mine in a release?** Until it does, the whole series is carried for dev
   builds and for `set fex mine`. `block-lookups` is the one topic with a result from play.
 - **Open:** `code-buffer`, `tso-syscalls`, `avx-hide`, `return-lookup`, `guest-address-literal`,
-  `exit-fpcr`, `branch-fold` and `return-site-suspend`. None has a number from play.
+  `exit-fpcr`, `branch-fold`, `return-site-suspend` and `abi-flags`. None has a number from play.
 
 ### Dropped
 
@@ -259,6 +260,7 @@ guest-address-literal
 exit-fpcr
 branch-fold
 return-site-suspend
+abi-flags
 engine-pins
 ```
 
@@ -286,6 +288,7 @@ guest-address-literal Guest addresses: An address above 4 GB is one ldr of a lit
 exit-fpcr Exits: An exit into native code skips its FPCR read while AFP is off, behind a switch
 branch-fold Branches: A compare with zero folds into its jz or jnz past the guest-opcode marker, behind a switch
 return-site-suspend Suspend: The block a call returns to doesn't poll the suspend doorbell, behind a switch
+abi-flags Flags: Arithmetic flags are dead across a call and a return in the main executable, behind a switch
 upstream-shufps SHUFPS: Upstream's one-source SHUFPS takes PSHUFD's path (FEX-Emu 604f018 and b5a4954)
 engine-pins Engine pins: The check against Mach9 0.4.0's engine, my disk cache version and the regenerated listings
 ```

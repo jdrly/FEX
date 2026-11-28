@@ -1068,6 +1068,22 @@ NTSTATUS ProcessInit() {
   auto MainModule = reinterpret_cast<__TEB*>(NtCurrentTeb())->Peb->ImageBaseAddress;
   HandleImageMap(reinterpret_cast<uint64_t>(MainModule), true);
 
+  // FEX_ABIFLAGS acts on the main executable's .text and nowhere else (jdrly/gw2-on-mac#390)
+  FEX_CONFIG_OPT(ABIFlags, ABIFLAGS);
+  if (ABIFlags() != FEXCore::Config::CONFIG_ABIFLAGS_OFF) {
+    auto* Nt = RtlImageNtHeader(MainModule);
+    auto* Section = IMAGE_FIRST_SECTION(Nt);
+    for (auto* SectionsEnd = Section + Nt->FileHeader.NumberOfSections; Section != SectionsEnd; Section++) {
+      if (memcmp(Section->Name, ".text\0\0\0", IMAGE_SIZEOF_SHORT_NAME) == 0) {
+        const uint64_t Begin = reinterpret_cast<uint64_t>(MainModule) + Section->VirtualAddress;
+        const uint64_t End = Begin + Section->Misc.VirtualSize;
+        CTX->SetABIFlagsRange(Begin, End);
+        LogMan::Msg::IFmt("FEX: ABIFlags {} in the main executable's .text {:x}-{:x}", ABIFlags(), Begin, End);
+        break;
+      }
+    }
+  }
+
   HandleImageMap(NtDllBase);
 
   CPUFeatures.emplace(*CTX);

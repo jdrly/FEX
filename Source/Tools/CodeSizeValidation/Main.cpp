@@ -84,6 +84,11 @@ public:
     return CurrentStats;
   }
 
+  // FEX_ABIFLAGS acts in the region the listings' code runs in, not above 4 GB (jdrly/gw2-on-mac#390)
+  void SetABIFlagsRange(FEXCore::Context::Context* CTX) const {
+    CTX->SetABIFlagsRange(reinterpret_cast<uint64_t>(CodeStart), reinterpret_cast<uint64_t>(CodeStart) + MAX_CODE_SIZE);
+  }
+
   bool InfoPrintingDisabled() const {
     return SetupInfoDisabled;
   }
@@ -625,6 +630,10 @@ int main(int argc, char** argv, char** const envp) {
   if (const char* FoldBranchPastMarkers = getenv("FEX_FOLDBRANCHPASTMARKERS")) {
     FEXCore::Config::Set(FEXCore::Config::CONFIG_FOLDBRANCHPASTMARKERS, FoldBranchPastMarkers);
   }
+  // and my hot-code harness with this set (jdrly/gw2-on-mac#390): the listings set it in their Env
+  if (const char* ABIFlags = getenv("FEX_ABIFLAGS")) {
+    FEXCore::Config::Set(FEXCore::Config::CONFIG_ABIFLAGS, *FEXCore::Config::Handler::ABIFlagsHandler(ABIFlags));
+  }
 
   // Host feature override. Only supports overriding SVE width.
   enum HostFeatures {
@@ -814,6 +823,7 @@ int main(int argc, char** argv, char** const envp) {
   if (!CTX->InitCore()) {
     return -1;
   }
+  CodeSize::Validation->SetABIFlagsRange(CTX.get());
   auto ParentThread = CTX->CreateThread();
 
   // GDT data

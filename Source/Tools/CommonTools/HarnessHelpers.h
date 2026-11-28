@@ -490,6 +490,11 @@ public:
     return RIP;
   }
 
+  // The test's code, where FEX_ABIFLAGS acts (jdrly/gw2-on-mac#390)
+  uint64_t CodeEnd() const {
+    return Code_start_page + RawASMFile.size();
+  }
+
   bool MapMemory(const std::function<void*(uint64_t, size_t)>& DoMMap) {
     bool LimitedSize = true;
     auto AllocPageSize = sysconf(_SC_PAGESIZE);

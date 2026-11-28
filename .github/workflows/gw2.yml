@@ -61,10 +61,12 @@
 #   Three instructions CodeSizeValidation compiles above 4 GB, a [rip + …] load, a call's push of its
 #   return address and add [rip + …], rax, have to be 2, 2 and 5 instructions shorter with
 #   FEX_GUESTADDRESSLITERALS at 1 than at 0, and unset the same code as at 0 (jdrly/gw2-on-mac#391).
-#   The assembly tests run once more with #343's, #391's and #395's switches on
-#   (FEX_RETURNLOOKUPOUTOFLINE, FEX_GUESTADDRESSLITERALS, FEX_FOLDBRANCHPASTMARKERS), as a dev build
-#   of my app runs them. That pass is asm-cuts, named for #164's two switches, which it ran too until
-#   I dropped them on 2026-11-27 (docs/gw2/adr/0013).
+#   The assembly tests run once more with #343's, #391's, #395's and #390's switches on
+#   (FEX_RETURNLOOKUPOUTOFLINE, FEX_GUESTADDRESSLITERALS, FEX_FOLDBRANCHPASTMARKERS,
+#   FEX_ABIFLAGS=both), as a dev build of my app runs them. That pass is asm-cuts, named for #164's
+#   two switches, which it ran too until I dropped them on 2026-11-27 (docs/gw2/adr/0013).
+#   TestHarnessRunner gives FEX_ABIFLAGS the test's code as its range, and no test reads an
+#   arithmetic flag across a call or a return (docs/gw2/adr/0017).
 #   FEX_SKIPRETURNSITESUSPENDCHECK (jdrly/gw2-on-mac#389) changes only what the JIT emits on Windows:
 #   on Linux the code is the same with it on and off, so the core job doesn't run with it.
 #   The pass with FEX_DISPATCHERL1LOOKUP=0 and asm-cuts run on a push and on a
@@ -753,9 +755,9 @@ jobs:
               cat "$out/asm-l1lookup-off.diff"
               status=1
             fi
-            # #343's, #391's and #395's switches with the lookups, as a dev build of my app runs them.
-            # The name is from #164's two switches, dropped on 2026-11-27 (docs/gw2/adr/0013).
-            suite asm-cuts '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_RETURNLOOKUPOUTOFLINE=1 FEX_GUESTADDRESSLITERALS=1 FEX_FOLDBRANCHPASTMARKERS=1
+            # #343's, #391's, #395's and #390's switches with the lookups, as a dev build of my app runs
+            # them. The name is from #164's two switches, dropped on 2026-11-27 (docs/gw2/adr/0013).
+            suite asm-cuts '\.asm$' FEX_HOSTFEATURES=disablesve,disableafp FEX_RETURNLOOKUPOUTOFLINE=1 FEX_GUESTADDRESSLITERALS=1 FEX_FOLDBRANCHPASTMARKERS=1 FEX_ABIFLAGS=both
           else
             echo "asm-l1lookup-off, asm-cuts: not run, this pull request changes neither FEXCore/Source/Interface/Core nor the workflow" |
               tee -a "$out/totals"
