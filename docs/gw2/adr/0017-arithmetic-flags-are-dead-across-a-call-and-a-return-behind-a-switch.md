@@ -42,27 +42,34 @@ For `Gw2-64.exe` of 2026-11-24 (PE time stamp 1795558714) the list is empty. The
 
 - decodes `.text` by recursive descent from every `.pdata` entry, every direct call or jump
   target, the image's entry point, every 64-bit relocation and every `lea [rip + …]` that points
-  into `.text`, and through 3,672 switch tables: MSVC's tables of RVAs, and the tables of offsets
+  into `.text`, and through 3,674 switch tables: MSVC's tables of RVAs, and the tables of offsets
   that hand-written routines like the CRT's `memcpy` jump through. Then it decodes every byte left
   that isn't int3 or nop padding or a table it resolved, as code, until nothing is left. That is
-  6,318,797 instructions, 553,100 call sites and 87,527 function entries, and it leaves 9,880 bytes
-  of the 23,419,304 in `.pdata` ranges and 1,169 of the 2,170,177 outside them undecoded;
-- from the instruction after every call follows every path until each of the six flags is
-  written: a read on the way means the caller takes a flag from the callee, or through it from
+  6,316,471 instructions, 553,094 call sites and 87,527 function entries, and it leaves 9,880 bytes
+  of the 23,419,304 in `.pdata` ranges and 6,794 of the 2,170,177 outside them undecoded;
+- from the instruction after every call follows every path, through the switch tables it
+  resolved, until each of the six flags is written: a read on the way means the caller takes a flag from the callee, or through it from
   before the call;
 - from every function entry does the same: a read means the callee takes a flag from its caller.
 
-Its flag model is capstone 5.0.7's, with two fixes. capstone gives `test` with a memory operand and
-a register, and four AVX compares, no flag information. Those count as writing every flag, so 700
-`test`s and 31 compares don't hide a read. A shift or rotate by CL counts as no write, since a count
-of 0 writes nothing. Every instruction that reads a flag whatever its operands (`jcc`, `setcc`,
+Its flag model is capstone 5.0.7's, with fixes where capstone is wrong or an instruction may
+write nothing. capstone gives `test` with a memory operand and a register, and four AVX compares,
+no flag information. Those count as writing every flag, so 697 `test`s and 31 compares don't hide a
+read. For x87 instructions capstone's flag field holds the FPU's flags, and it leaves some, like
+`fstp`, out of its FPU group: every mnemonic starting with `f` counts as no write except the
+`fcomi` forms, and `fcmov` as a read. A shift or rotate by CL, `shld` and `shrd` included, counts
+as no write, since a count of 0 writes nothing, and so does a `rep` compare, which compares nothing
+with rcx at 0. Every instruction that reads a flag whatever its operands (`jcc`, `setcc`,
 `cmovcc`, `adc`, `sbb`, `pushf`, `lahf`, `rcl`, `rcr`, `cmc` and the others) counts as a reader
 even where capstone gives no read. None had to be. A copy of the executable with two planted
 cases, a caller whose `test eax, eax` after a call became a `nop` and an entry whose first
-instruction became `sete al`, gives exactly those two hits more.
+instruction became `sete al`, gives exactly those two hits more. A small program built with
+llvm-mingw plants a read after a call behind `fld1; fstp`, a `shld` by CL, a `repe cmpsb`, an
+MSVC switch through a table of RVAs and one through a table of offsets, and an entry that reads CF
+after `fld1`. The script finds all six. The version I first reviewed found none of them.
 
-On the real file it finds 7 call sites and 6 entries, all in bytes that aren't code: 3 calls in
-tables of RVAs after a `ret`, decoded as instructions, 4 calls to addresses outside the image, 5
+On the real file it finds 4 call sites and 6 entries, all in bytes that aren't code: a call in a
+table of RVAs after a `ret`, decoded as instructions, 3 calls to addresses outside the image, 5
 entries at the first word of a table of offsets, and 1 in the middle of a `jmp`. The first run without the `test` fix found 81 call sites and 16 entries, every one of
 them a `test [mem], reg` before the read.
 
@@ -83,7 +90,7 @@ What the search doesn't see:
   out of step;
 - a routine in a DLL or an addon that the executable calls and that reads the flags it arrives
   with: the executable's call drops them;
-- a later game build. The script runs again in about four minutes, and has to before the switch
+- a later game build. The script runs again in minutes, and has to before the switch
   becomes a default.
 
 ## What it does on GW2's code
@@ -142,8 +149,14 @@ leave the `cfinv` and both copies in place. `InvalidateFlags` emits no host code
 
 - Off, the JIT emits what it did, and the harness's units are the same code unit for unit.
 - A fault or a suspend inside a callee, or right after a return, in the executable's code reports
-  arithmetic flags in its `CONTEXT` that x86 wouldn't have. The ABI makes them undefined there, and
+  arithmetic flags in its `CONTEXT` that x86 wouldn't have. So does a fault before the transfer
+  itself, between the last flag write the pass dropped and the exit: an indirect call's load of
+  its target, or the return address's push. The ABI makes the flags undefined across the call, and
   nothing in GW2 that I know of reads them from a context.
+- With FEX's disk cache on (`FEX_DISKCACHE`, off by default and in my app), a block cached while
+  an image was a process's main executable could be reused where the same image isn't: the cache
+  keys a block on the file and its offset, not on the range. jdrly/gw2-on-mac#116, which would turn
+  it on, has to take that into account.
 - The option affects code generation, so the disk cache keeps blocks of each value apart, and
   `FormatVersion` goes up by one in the branch's last commit.
 - No CPUState field moves, so `GW2Contract.h` and my Wine sampler stay as they are.

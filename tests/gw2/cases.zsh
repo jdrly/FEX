@@ -445,8 +445,8 @@ abi_range() {
   [[ $which == mine ]] && (( ${+ran[$1]} )) || return 0
   local log=() text fex
   [[ -f $prefix/$1.log ]] && log=(${(f)"$(tr -d '\r' <"$prefix/$1.log")"})
-  text=${${log[(r)gw2 test abiflags: .text *]}##* }
-  fex=${${log[(r)*FEX: ABIFlags * in the main executable?s .text *]}##* }
+  text=${${log[(r)gw2 test abiflags: .text *]:-}##* }
+  fex=${${log[(r)*FEX: ABIFlags * in the main executable?s .text *]:-}##* }
   if [[ -n $text && $text == "$fex" ]]; then
     print "ok    $1-range: FEX's range is the program's .text, $text"
   else

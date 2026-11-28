@@ -72,10 +72,9 @@ __asm__(".section .abiflag,\"xr\"\n"
         "    addq $40, %rsp\n"
         "    ret\n");
 
-/* The section of the image that holds p, by name, with its range */
-static const char *section_of(const void *p, uintptr_t *begin, uintptr_t *end)
+/* The section of the image that holds p, by name into name, with its range. "none" and 0-0 without one */
+static const char *section_of(const void *p, char name[9], uintptr_t *begin, uintptr_t *end)
 {
-    static char name[9];
     const uint8_t *base = (const uint8_t *)GetModuleHandleA(NULL);
     const IMAGE_NT_HEADERS64 *nt = (const IMAGE_NT_HEADERS64 *)(base + ((const IMAGE_DOS_HEADER *)base)->e_lfanew);
     const IMAGE_SECTION_HEADER *s = IMAGE_FIRST_SECTION(nt);
@@ -85,11 +84,13 @@ static const char *section_of(const void *p, uintptr_t *begin, uintptr_t *end)
         if ((uintptr_t)p >= b && (uintptr_t)p < e)
         {
             memcpy(name, s->Name, 8);
+            name[8] = 0;
             *begin = b;
             *end = e;
             return name;
         }
     }
+    *begin = *end = 0;
     return "none";
 }
 
@@ -97,8 +98,9 @@ int main(void)
 {
     int failed = 0;
     uintptr_t tb, te, ob, oe;
-    const char *in = section_of((const void *)in_carry, &tb, &te);
-    const char *out = section_of((const void *)out_stc, &ob, &oe);
+    char in_name[9], out_name[9];
+    const char *in = section_of((const void *)in_carry, in_name, &tb, &te);
+    const char *out = section_of((const void *)out_stc, out_name, &ob, &oe);
     printf("gw2 test abiflags: .text %llx-%llx\n", (unsigned long long)tb, (unsigned long long)te);
     printf("gw2 test abiflags: the callers in %s, the routines in %s %llx-%llx\n", in, out, (unsigned long long)ob,
            (unsigned long long)oe);
