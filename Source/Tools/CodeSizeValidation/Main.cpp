@@ -621,6 +621,10 @@ int main(int argc, char** argv, char** const envp) {
   if (const char* GuestAddressLiterals = getenv("FEX_GUESTADDRESSLITERALS")) {
     FEXCore::Config::Set(FEXCore::Config::CONFIG_GUESTADDRESSLITERALS, GuestAddressLiterals);
   }
+  // and my hot-code harness with this set (jdrly/gw2-on-mac#395): the listings set it in their Env
+  if (const char* FoldBranchPastMarkers = getenv("FEX_FOLDBRANCHPASTMARKERS")) {
+    FEXCore::Config::Set(FEXCore::Config::CONFIG_FOLDBRANCHPASTMARKERS, FoldBranchPastMarkers);
+  }
 
   // Host feature override. Only supports overriding SVE width.
   enum HostFeatures {

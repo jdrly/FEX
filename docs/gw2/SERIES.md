@@ -56,6 +56,7 @@ How to read the columns:
 | `upstream-shufps` | 1 | FEX-Emu's `604f018` and its test `b5a4954`, picked as they are with their authors (jdrly/gw2-on-mac#381): a `SHUFPS` with the same register as both sources takes `PSHUFD`'s one-source path. It came after the head this table was written against | none. It is upstream's code in upstream's file, without the switch ADR 0002 asks for, as #381 decided: every shuffle gives the same result on my Mac, and a switch of mine would conflict when the base brings the commit. On a host with SVE256, which my Mac doesn't have, `vshufps xmm, xmm, xmm, 0xe4` now keeps the source's upper lane, where the old code cleared it (review of #381) | not in 0.2.1 | no | `Gw2-64.exe` has 9,789 `shufps` with one register twice. 7,255 have an immediate other than 0 and take the new path. 4,977 of those are broadcasts, three instructions before and one after, and 0xc9's 1,214 go from a two-table lookup to a one-table one (the triage of 2026-11-27). No number from play | **keep until the base has it.** A replay onto a base that has both `604f018` and `b5a4954` reports it empty, and the topic goes |
 | `guest-address-literal` | 1 | A guest address above 4 GB, a return address or a `[rip + …]` address, is one `ldr` of a literal after the unit's code in place of three moves, and an instruction that reads and writes `[rip + …]` builds the address once (ADR 0014, jdrly/gw2-on-mac#391). It came after the head this table was written against | `FEX_GUESTADDRESSLITERALS` (off) | not in 0.2.1 | None yet. Its dev list row is for me to file | On the 3,109 units of #175's busy span 41,262 guest addresses built in three moves or two become 41,170 `ldr`s: a direct call is 5 instructions in place of 7 (17,907 calls of that shape) and a `[rip + …]` load 2 in place of 4 (2,850). 1.48% of the game thread's samples sat on the moves (the hot-code study of 2026-11-27, lever 3). No number from play | **decide.** Never a default. The open case is a session on and off |
 | `exit-fpcr` | 1 | An exit from JIT code into native code skips its `FPCR` read and its AH and NEP tests when AFP is off, the only case in which nothing sets either bit (jdrly/gw2-on-mac#392). The exit is chosen once, at process start, and `ExitFunctionEC` keeps its bytes. It came after the head this table was written against | `FEX_EXITFPCRCHECK` (`always`, the engine's exit) | not in 0.2.1 | None yet. Its dev list row is `=afp` | 0.47% of the game thread's samples sit on that `mrs` in #175's session of 2026-11-27, at 28,000 to 43,000 exits a frame (the hot-code study's lever 5). The exit microbenchmark's ns a call are in the pull request. No number from play | **decide.** Never a default. The open case is a sampler session with `afp` |
+| `branch-fold` | 1 | `FoldBranch` looks past the guest-opcode marker before a `Jcc` and past `test`'s flag invalidation, so a compare with zero and its `jz` or `jnz` become one `cbz` or `cbnz`, and a float compare's `axflag` goes into its branch, when the flags are dead on both exits (ADR 0015, jdrly/gw2-on-mac#395, from aurora-silicon/fex `edd71e9`). It came after the head this table was written against | `FEX_FOLDBRANCHPASTMARKERS` (off) | not in 0.2.1 | None yet. Its dev list row is for me to file | On the 3,109 units of #175's busy span, 5,927 compares and 2,053 `axflag`s go: 1,088,837 words to 1,080,840 (the hot-code study's harness). 3.07% of the game thread's samples sat on a compare with zero before a flag branch, 0.82% of it on `subs` forms that keep PF and stay. A fault after a folded branch doesn't report x86's flags (ADR 0015). No number from play | **decide.** Never a default. The open case is a sampler session and fps on and off |
 | `kept-0.3.1-history` | 31 | athei's 10 commits of the 0.3.1 base and my 21 on them, reachable under the merges | n/a | n/a | n/a | n/a | **keep as history.** Not replayed. Its content is in the 30 |
 | `engine-move-merges` | 2 | `4af914c59`, with `597e7ccbedd`'s tree, and `35f3f2d0c` (#21), with `8a969bc74`'s | n/a | n/a | n/a | n/a | **keep as history.** No tree effect |
 
@@ -68,8 +69,8 @@ Numbers like #25 are this fork's pull requests. The triage is my workspace's
 
 - **Does `fex` default to mine in a release?** Until it does, the whole series is carried for dev
   builds and for `set fex mine`. `block-lookups` is the one topic with a result from play.
-- **Open:** `code-buffer`, `tso-syscalls`, `avx-hide`, `return-lookup`, `guest-address-literal` and
-  `exit-fpcr`. None has a number from play.
+- **Open:** `code-buffer`, `tso-syscalls`, `avx-hide`, `return-lookup`, `guest-address-literal`,
+  `exit-fpcr` and `branch-fold`. None has a number from play.
 
 ### Dropped
 
@@ -255,6 +256,7 @@ suspend-fix
 return-lookup
 guest-address-literal
 exit-fpcr
+branch-fold
 engine-pins
 ```
 
@@ -280,6 +282,7 @@ suspend-fix Suspend: A thread spinning in a loop closed by a conditional backwar
 return-lookup Returns: A predicted return falls through to its ret, and the L1 lookup moves after the unit, behind a switch
 guest-address-literal Guest addresses: An address above 4 GB is one ldr of a literal after the unit's code, behind a switch
 exit-fpcr Exits: An exit into native code skips its FPCR read while AFP is off, behind a switch
+branch-fold Branches: A compare with zero folds into its jz or jnz past the guest-opcode marker, behind a switch
 upstream-shufps SHUFPS: Upstream's one-source SHUFPS takes PSHUFD's path (FEX-Emu 604f018 and b5a4954)
 engine-pins Engine pins: The check against Mach9 0.4.0's engine, my disk cache version and the regenerated listings
 ```

@@ -160,6 +160,9 @@ private:
   CondClass X86ToArmFloatCond(CondClass X86);
   bool ProcessBlock(IREmitter* IREmit, IRListView& CurrentIR, Ref Block, ControlFlowGraph& CFG);
   void OptimizeParity(IREmitter* IREmit, IRListView& CurrentIR, ControlFlowGraph& CFG);
+
+  // GW2 on Mac (jdrly/gw2-on-mac#395)
+  FEX_CONFIG_OPT(FoldBranchPastMarkers, FOLDBRANCHPASTMARKERS);
 };
 
 unsigned DeadFlagCalculationEliminination::FlagsForCondClassType(CondClass Cond) {
@@ -464,21 +467,33 @@ CondClass DeadFlagCalculationEliminination::X86ToArmFloatCond(CondClass X86) {
   // G would be "greater than or less than", no condition code.
   //
   // SF/OF conditions are trivial and therefore shouldn't actually be generated
+  //
+  // GW2 on Mac (jdrly/gw2-on-mac#395): LE isn't in the table. After ucomiss SF and OF are clear, so
+  // x86's jle is ZF, "equal or unordered", while arm64's LE after fcmp is also true for less than.
+  // FoldBranchPastMarkers makes this table reachable.
   switch (X86) {
-  case CondClass::UGE /* A  */: return CondClass::FGE /* GE */;
-  case CondClass::UGT /* AE */: return CondClass::FGT /* GT */;
+  case CondClass::UGE /* AE */: return CondClass::FGE /* GE */;
+  case CondClass::UGT /* A  */: return CondClass::FGT /* GT */;
   case CondClass::ULT /* B  */: return CondClass::SLT /* LT */;
   case CondClass::ULE /* BE */: return CondClass::SLE /* LE */;
-  case CondClass::SLE /* LE */: return CondClass::SLE /* LE */;
   default: return CondClass::AL;
   }
 }
 
 void DeadFlagCalculationEliminination::FoldBranch(IREmitter* IREmit, IRListView& CurrentIR, IROp_CondJump* Op, Ref CodeNode) {
   // Skip past StoreRegisters at the end -- they don't touch flags.
+  //
+  // GW2 on Mac (jdrly/gw2-on-mac#395), from aurora-silicon/fex edd71e9 (MIT): Core.cpp emits a GuestOpcode marker
+  // before every Jcc, since it sets RIP, and TEST invalidates AF. With FoldBranchPastMarkers the scan skips both:
+  // neither emits a flag-setting instruction or changes a register. Without it a compare and a Jcc never fold.
+  const bool PastMarkers = FoldBranchPastMarkers();
   auto PrevWrap = CodeNode->Header.Previous;
-  while (CurrentIR.GetOp<IR::IROp_Header>(PrevWrap)->Op == OP_STOREREGISTER ||
-         CurrentIR.GetOp<IR::IROp_Header>(PrevWrap)->Op == OP_STOREPF || CurrentIR.GetOp<IR::IROp_Header>(PrevWrap)->Op == OP_STOREAF) {
+  while (true) {
+    const auto PrevOp = CurrentIR.GetOp<IR::IROp_Header>(PrevWrap)->Op;
+    if (!(PrevOp == OP_STOREREGISTER || PrevOp == OP_STOREPF || PrevOp == OP_STOREAF ||
+          (PastMarkers && (PrevOp == OP_GUESTOPCODE || PrevOp == OP_INVALIDATEFLAGS)))) {
+      break;
+    }
     PrevWrap = CurrentIR.GetNode(PrevWrap)->Header.Previous;
   }
 
@@ -501,6 +516,13 @@ void DeadFlagCalculationEliminination::FoldBranch(IREmitter* IREmit, IRListView&
 
     auto SecondArg = CurrentIR.GetOp<IR::IROp_Header>(Prev->Args[1]);
     if (SecondArg->Op != OP_INLINECONSTANT || SecondArg->C<IR::IROp_InlineConstant>()->Constant != 0) {
+      return;
+    }
+
+    // SubNZCV inlines a zero first source ("Inline": ["Zero", ...]), as after "xor eax, eax; cmp eax, 0", and CondJump
+    // needs a register there (aurora-silicon/fex edd71e9 checks the same).
+    const auto FirstArg = CurrentIR.GetOp<IR::IROp_Header>(Prev->Args[0])->Op;
+    if (FirstArg == OP_INLINECONSTANT || FirstArg == OP_INLINEENTRYPOINTOFFSET) {
       return;
     }
 

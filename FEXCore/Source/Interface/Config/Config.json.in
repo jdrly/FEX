@@ -846,6 +846,15 @@
           "\talways: Every exit reads FPCR and tests both bits (default)",
           "\tafp: Only while AFP is in use. Without AFP nothing sets them, and the exit skips the read and the tests"
         ]
+      },
+      "FoldBranchPastMarkers": {
+        "Type": "bool",
+        "Default": "false",
+        "AffectsCodeGen": "true",
+        "Desc": [
+          "A compare with zero and a jz or jnz after it fold into one cbz or cbnz when the flags are dead after the jump.",
+          "The fold looks past the guest-opcode marker before the jump and past TEST's flag invalidation, which stop it otherwise."
+        ]
       }
     }
   },
