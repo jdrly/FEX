@@ -855,6 +855,15 @@
           "A compare with zero and a jz or jnz after it fold into one cbz or cbnz when the flags are dead after the jump.",
           "The fold looks past the guest-opcode marker before the jump and past TEST's flag invalidation, which stop it otherwise."
         ]
+      },
+      "SkipReturnSiteSuspendCheck": {
+        "Type": "bool",
+        "Default": "false",
+        "AffectsCodeGen": "true",
+        "Desc": [
+          "Windows only: an entry point that a call earlier in the same unit returns to doesn't poll the suspend doorbell.",
+          "The callee's entry polled it. Every other entry point and backward branch still does."
+        ]
       }
     }
   },

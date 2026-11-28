@@ -65,6 +65,8 @@
 #   (FEX_RETURNLOOKUPOUTOFLINE, FEX_GUESTADDRESSLITERALS, FEX_FOLDBRANCHPASTMARKERS), as a dev build
 #   of my app runs them. That pass is asm-cuts, named for #164's two switches, which it ran too until
 #   I dropped them on 2026-11-27 (docs/gw2/adr/0013).
+#   FEX_SKIPRETURNSITESUSPENDCHECK (jdrly/gw2-on-mac#389) changes only what the JIT emits on Windows:
+#   on Linux the code is the same with it on and off, so the core job doesn't run with it.
 #   The pass with FEX_DISPATCHERL1LOOKUP=0 and asm-cuts run on a push and on a
 #   pull request that changes FEXCore/Source/Interface/Core or this workflow (jdrly/gw2-on-mac#326).
 #   The failures are compared with tests/gw2/core-failures.txt, the
